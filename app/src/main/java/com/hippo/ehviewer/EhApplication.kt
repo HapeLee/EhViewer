@@ -49,6 +49,7 @@ import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.ui.EhActivity
 import com.hippo.ehviewer.ui.keepNoMediaFileStatus
 import com.hippo.ehviewer.widget.SearchDatabase
+import com.hippo.okhttp.CloudflareInterceptor
 import com.hippo.scene.SceneApplication
 import com.hippo.util.ReadableTime
 import com.hippo.util.isAtLeastP
@@ -56,7 +57,6 @@ import com.hippo.util.launchIO
 import com.hippo.util.loadHtml
 import com.hippo.yorozuya.FileUtils
 import com.hippo.yorozuya.IntIdGenerator
-import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -257,7 +257,7 @@ class EhApplication :
                 dns(EhDns)
                 proxySelector(ehProxySelector)
                 sslSocketFactory(EhSSLSocketFactory(certs.sslSocketFactory()), certs.trustManager)
-                addInterceptor(CloudflareInterceptor(application))
+                addInterceptor(CloudflareInterceptor())
             }.build()
         }
 
