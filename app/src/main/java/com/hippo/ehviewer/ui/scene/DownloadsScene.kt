@@ -17,17 +17,22 @@ package com.hippo.ehviewer.ui.scene
 
 import android.content.Context
 import android.content.Intent
-import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
@@ -37,197 +42,351 @@ import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.download.DownloadManager.DownloadInfoListener
 import com.hippo.ehviewer.download.DownloadService
-import com.hippo.ehviewer.download.DownloadService.Companion.clear
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.ui.GalleryActivity
-import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.screen.DownloadItemUi
 import com.hippo.ehviewer.ui.compose.screen.DownloadLabelUi
 import com.hippo.ehviewer.ui.compose.screen.DownloadsScreen
 import com.hippo.ehviewer.ui.compose.screen.DownloadsUiState
+import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 import com.hippo.unifile.UniFile
-import com.hippo.util.getParcelableCompat
 import com.hippo.util.launchIO
 import com.hippo.util.launchNonCancellable
 import com.hippo.yorozuya.collect.LongList
 
+private const val LABEL_OFFSET = 2
+
+/** 标题关键字过滤借用 `mType` 槽位，取值与任何真实下载状态都不冲突 */
+private const val FILTER_TYPE_TITLE = 5
+
+private val PATTERN_AUTHOR = Regex("^(?:\\([^\\[\\]()]+\\))?\\s*\\[([^\\[\\]]+)]")
+private val PATTERN_NAME = Regex("^(?:\\([^\\[\\]()]+\\))?\\s*(?:\\[[^\\[\\]]+])?\\s*(.+)")
+
+private fun getAuthor(title: String): String {
+    val matcher = PATTERN_AUTHOR.find(title) ?: return ""
+    return matcher.groupValues[1].trim { it <= ' ' }
+}
+
+private fun getName(title: String): String {
+    val matcher = PATTERN_NAME.find(title) ?: return title
+    return matcher.groupValues[1].trim { it <= ' ' }
+}
+
+private fun downloadComparator(sort: Int): Comparator<DownloadInfo> = Comparator { o1, o2 ->
+    val title1 = EhUtils.getSuitableTitle(o1)
+    val title2 = EhUtils.getSuitableTitle(o2)
+    when (sort) {
+        0 -> o2.time.compareTo(o1.time)
+        1 -> o1.time.compareTo(o2.time)
+        2 -> title1.compareTo(title2, true)
+        3 -> title2.compareTo(title1, true)
+        4 -> getAuthor(title1).compareTo(getAuthor(title2), true)
+        5 -> getAuthor(title2).compareTo(getAuthor(title1), true)
+        6 -> getName(title1).compareTo(getName(title2), true)
+        7 -> getName(title2).compareTo(getName(title1), true)
+        8 -> o1.category.compareTo(o2.category)
+        9 -> o2.category.compareTo(o1.category)
+        else -> 0
+    }
+}
+
 /**
  * 下载页。
  *
- * 结构调整：
- * - 界面整体搬到 Compose（[DownloadsScreen]），本类只保留列表派生（过滤/排序）、多选集合和下载管理交互
- * - 7 个 FAB 的操作台改成多选顶栏；右侧标签抽屉搬进场景内的 `ModalNavigationDrawer`
- * - 列表从 `AutoStaggeredGridLayoutManager` 换成自适应列宽的 `LazyVerticalGrid`，
- *   不再提供 FastScroller 与「手动拖动置顶」，置顶改由多选菜单触发（按 time 写库，语义与旧实现一致）
- * - 数据仍是 `DownloadManager` 的内存表，但每次变化都重建一份不可变快照 [infos]，
- *   避免 Compose 读到可变对象内部字段后不刷新
+ * P7-c 出壳：不再是 Fragment，`onCreate` / `onDestroy` 的监听注册换成 [DisposableEffect]，
+ * `onSaveInstanceState` 的标签记忆换成 `rememberSaveable`，`onBackPressed` 的多选取消
+ * 换成 [BackHandler]，`onNewArguments` 的参数换新由 route 承担
+ * （`EhNavController.push` 按 [com.hippo.ehviewer.ui.compose.nav.navSlot] 换掉同一页的参数）。
+ *
+ * 列表派生（过滤 / 排序）、多选集合、标签操作的语义与旧实现一致。
  */
-class DownloadsScene : EhComposeScene() {
+@Composable
+fun DownloadsScene(route: EhRoute.Downloads) {
+    val context = LocalContext.current
+    // 起服务、读画廊都要宿主 Activity
+    val activity = context as? MainActivity
+    val host = ehHostOrNoOp()
+    val navigator = ehNavigator()
+    val scope = rememberCoroutineScope()
 
-    private var label: String? = null
-    private var sort = Settings.defaultSortingMethod
-    private var typeFilter = -1
-    private var keyword: String? = null
-    private var infos: List<DownloadInfo> = emptyList()
-    private var selection by mutableStateOf(emptySet<Long>())
-    private var version by mutableStateOf(0)
-    private var scrollToGid by mutableStateOf<Long?>(null)
+    val defaultLabelName = stringResource(R.string.default_download_label_name)
+    val allLabelName = stringResource(R.string.download_all)
 
-    private val listener = object : DownloadInfoListener {
-        override fun onAdd(info: DownloadInfo, list: List<DownloadInfo>, position: Int) = rebuild()
-        override fun onUpdate(info: DownloadInfo, list: List<DownloadInfo>) {
-            version++
-        }
-        override fun onUpdateAll() = rebuild()
-        override fun onReload() = rebuild()
-        override fun onChange() {
-            label = null
-            rebuild()
-        }
-        override fun onRenameLabel(from: String, to: String) {
-            if (label == from) label = to
-            rebuild()
-        }
-        override fun onRemove(info: DownloadInfo, list: List<DownloadInfo>, position: Int) = rebuild()
-        override fun onUpdateLabels() = rebuild()
+    // 通知栏带 gid 进来：落到那一项所在的标签，并滚过去
+    val initialLabel = remember {
+        val info = if (route.gid != -1L) DownloadManager.getDownloadInfo(route.gid) else null
+        if (info != null) info.label else Settings.recentDownloadLabel
     }
 
-    override fun getNavCheckedItem(): Int = R.id.nav_downloads
+    var label by rememberSaveable { mutableStateOf(initialLabel) }
+    var sort by remember { mutableIntStateOf(Settings.defaultSortingMethod) }
+    var typeFilter by remember { mutableIntStateOf(-1) }
+    var keyword by remember { mutableStateOf<String?>(null) }
+    var infos by remember { mutableStateOf<List<DownloadInfo>>(emptyList()) }
+    var selection by remember { mutableStateOf(emptySet<Long>()) }
+    var version by remember { mutableIntStateOf(0) }
+    var scrollToGid by remember { mutableStateOf(route.gid.takeIf { it != -1L }) }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        DownloadManager.addDownloadInfoListener(listener)
-        if (savedInstanceState == null) {
-            if (!handleArguments(arguments)) {
-                label = Settings.recentDownloadLabel
+    fun rebuild() {
+        var raw: List<DownloadInfo> = when {
+            label == null -> DownloadManager.allDownloadInfoList
+            label == defaultLabelName -> DownloadManager.defaultDownloadInfoList
+            else -> DownloadManager.getLabelDownloadInfoList(label!!) ?: run {
+                label = null
+                DownloadManager.allDownloadInfoList
             }
-        } else {
-            label = savedInstanceState.getString(KEY_LABEL)
+        }
+        // 与旧实现一致的 or 语义：关键字过滤与状态过滤共用同一个槽位
+        if (typeFilter != -1) {
+            val currentKeyword = keyword
+            raw = raw.filter {
+                currentKeyword != null && EhUtils.getSuitableTitle(it).contains(currentKeyword, true) ||
+                    it.state == typeFilter
+            }
+        }
+        infos = if (sort == 10) raw.shuffled() else raw.sortedWith(downloadComparator(sort))
+        version++
+        Settings.putRecentDownloadLabel(label)
+    }
+
+    val listener = remember {
+        object : DownloadInfoListener {
+            override fun onAdd(info: DownloadInfo, list: List<DownloadInfo>, position: Int) = rebuild()
+            override fun onUpdate(info: DownloadInfo, list: List<DownloadInfo>) {
+                version++
+            }
+
+            override fun onUpdateAll() = rebuild()
+            override fun onReload() = rebuild()
+            override fun onChange() {
+                label = null
+                rebuild()
+            }
+
+            override fun onRenameLabel(from: String, to: String) {
+                if (label == from) label = to
+                rebuild()
+            }
+
+            override fun onRemove(info: DownloadInfo, list: List<DownloadInfo>, position: Int) = rebuild()
+            override fun onUpdateLabels() = rebuild()
+        }
+    }
+
+    var initialized by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!initialized) {
+            initialized = true
+            if (route.clearService) {
+                DownloadService.clear()
+            }
         }
         rebuild()
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putString(KEY_LABEL, label)
+    DisposableEffect(listener) {
+        DownloadManager.addDownloadInfoListener(listener)
+        onDispose { DownloadManager.removeDownloadInfoListener(listener) }
     }
 
-    override fun onNewArguments(args: Bundle) {
-        if (handleArguments(args)) {
-            rebuild()
+    // 多选状态下返回键先退出多选，不弹页面
+    BackHandler(enabled = selection.isNotEmpty()) {
+        selection = emptySet()
+    }
+
+    fun selectedInfos(): List<DownloadInfo> = infos.filter { it.gid in selection }
+
+    fun pinTopSelected() {
+        val pinList = selectedInfos().reversed()
+        val now = System.currentTimeMillis()
+        pinList.forEachIndexed { index, info ->
+            info.time = now + index
+            EhDB.putDownloadInfo(info)
+        }
+        selection = emptySet()
+        rebuild()
+    }
+
+    fun startSelected() {
+        val gids = LongList()
+        selectedInfos().forEach { gids.add(it.gid) }
+        if (gids.isEmpty()) return
+        val target = activity ?: return
+        val intent = Intent(target, DownloadService::class.java)
+        intent.action = DownloadService.ACTION_START_RANGE
+        intent.putExtra(DownloadService.KEY_GID_LIST, gids)
+        ContextCompat.startForegroundService(target, intent)
+        selection = emptySet()
+    }
+
+    fun stopSelected() {
+        val gids = LongList()
+        selectedInfos().forEach { gids.add(it.gid) }
+        if (gids.isEmpty()) return
+        DownloadManager.stopRangeDownload(gids)
+        selection = emptySet()
+    }
+
+    fun deleteSelected(removeFiles: Boolean) {
+        val list = selectedInfos()
+        if (list.isEmpty()) return
+        val gids = LongList()
+        list.forEach { gids.add(it.gid) }
+        selection = emptySet()
+        DownloadManager.deleteRangeDownload(gids)
+        Settings.putRemoveImageFiles(removeFiles)
+        if (removeFiles) {
+            val files = arrayOfNulls<UniFile>(list.size)
+            for ((index, info) in list.withIndex()) {
+                files[index] = SpiderDen.getGalleryDownloadDir(info.gid)
+                DownloadManager.removeDownloadDirname(info.gid)
+            }
+            scope.launchIO {
+                runCatching { files.forEach { it?.delete() } }
+            }
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        DownloadManager.removeDownloadInfoListener(listener)
+    fun moveSelected(newLabel: String?) {
+        val list = selectedInfos()
+        if (list.isEmpty()) return
+        selection = emptySet()
+        DownloadManager.changeLabel(list, newLabel)
+        rebuild()
     }
 
-    override fun onBackPressed() {
-        if (selection.isNotEmpty()) {
-            selection = emptySet()
-            return
+    fun startOne(gid: Long) {
+        val info = infos.firstOrNull { it.gid == gid } ?: return
+        val target = activity ?: return
+        val intent = Intent(target, DownloadService::class.java)
+        intent.action = DownloadService.ACTION_START
+        intent.putExtra(DownloadService.KEY_GALLERY_INFO, info)
+        ContextCompat.startForegroundService(target, intent)
+    }
+
+    fun startAll() {
+        val target = activity ?: return
+        val intent = Intent(target, DownloadService::class.java)
+        intent.action = DownloadService.ACTION_START_ALL
+        ContextCompat.startForegroundService(target, intent)
+    }
+
+    fun startAllReversed() {
+        val target = activity ?: return
+        val gids = LongList()
+        for (index in infos.indices.reversed()) {
+            val info = infos[index]
+            if (info.state != DownloadInfo.STATE_FINISH) {
+                gids.add(info.gid)
+            }
         }
-        super.onBackPressed()
+        if (gids.isEmpty()) return
+        val intent = Intent(target, DownloadService::class.java)
+        intent.action = DownloadService.ACTION_START_RANGE
+        intent.putExtra(DownloadService.KEY_GID_LIST, gids)
+        ContextCompat.startForegroundService(target, intent)
     }
 
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.Downloads> {
-            DownloadsScreen(
-                state = uiState(),
-                onOpenNavDrawer = { toggleDrawer(GravityCompat.START) },
-                onToggleSelect = ::toggleSelect,
-                onSelectAll = { selection = infos.map { it.gid }.toSet() },
-                onClearSelection = { selection = emptySet() },
-                onRead = ::readDownloaded,
-                onOpenDetail = ::openDetail,
-                onStartOne = ::startOne,
-                onStopOne = { DownloadManager.stopDownload(it) },
-                onPinTopSelected = ::pinTopSelected,
-                onStartSelected = ::startSelected,
-                onStopSelected = ::stopSelected,
-                onDeleteSelected = ::deleteSelected,
-                onMoveSelected = ::moveSelected,
-                onFilterType = {
-                    typeFilter = it
-                    keyword = null
-                    rebuild()
-                },
-                onFilterTitle = {
-                    typeFilter = FILTER_TYPE_TITLE
-                    keyword = it.lowercase()
-                    rebuild()
-                },
-                onSort = {
-                    sort = it
-                    Settings.putDefaultSortingMethod(it)
-                    rebuild()
-                },
-                onStartAll = ::startAll,
-                onStopAll = { DownloadManager.stopAllDownload() },
-                onStartAllReversed = ::startAllReversed,
-                onResetReadingProgress = ::confirmResetReadingProgress,
-                onSelectLabel = ::selectLabel,
-                onAddLabel = ::addLabel,
-                onRenameLabel = ::renameLabel,
-                onDeleteLabel = ::deleteLabel,
-                onMoveLabel = ::moveLabel,
-                onSetDefaultLabel = ::setDefaultLabel,
-                onScrollToGidDone = { scrollToGid = null },
-            )
+    fun confirmResetReadingProgress() {
+        AlertDialog.Builder(context)
+            .setMessage(R.string.reset_reading_progress_message)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                scope.launchNonCancellable {
+                    DownloadManager.resetAllReadingProgress()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    fun readDownloaded(gid: Long) {
+        val info = infos.firstOrNull { it.gid == gid } ?: return
+        context.startActivity(
+            Intent(context, GalleryActivity::class.java).apply {
+                action = GalleryActivity.ACTION_EH
+                putExtra(GalleryActivity.KEY_GALLERY_INFO, info)
+            },
+        )
+    }
+
+    fun openDetail(gid: Long) {
+        val info = infos.firstOrNull { it.gid == gid } ?: return
+        navigator.push(EhRoute.GalleryDetail(gid = info.gid, token = info.token))
+    }
+
+    fun validateLabel(name: String, self: String?): Boolean {
+        if (name == allLabelName || name == defaultLabelName) {
+            host.showTip(R.string.label_text_is_invalid, BaseScene.LENGTH_LONG)
+            return false
         }
+        if (name != self && DownloadManager.containLabel(name)) {
+            host.showTip(R.string.label_text_exist, BaseScene.LENGTH_LONG)
+            return false
+        }
+        return true
     }
 
-    private fun uiState(): DownloadsUiState = DownloadsUiState(
-        title = getString(
-            R.string.scene_download_title,
-            label ?: getString(R.string.download_all),
-        ),
-        items = infos.map { info ->
-            DownloadItemUi(
-                gid = info.gid,
-                title = EhUtils.getSuitableTitle(info),
-                uploader = info.uploader,
-                rating = info.rating,
-                category = info.category,
-                thumbUrl = info.thumb?.thumbUrl,
-                state = info.state,
-                legacy = info.legacy,
-                finished = info.finished,
-                total = info.total,
-                speed = info.speed,
-                label = info.label,
-                selected = info.gid in selection,
-            )
-        },
-        labels = buildLabels(),
-        selectionMode = selection.isNotEmpty(),
-        selectedCount = selection.size,
-        sort = sort,
-        typeFilter = typeFilter,
-        keyword = keyword,
-        scrollToGid = scrollToGid,
-        version = version,
-    )
+    fun selectLabel(name: String?) {
+        if (label == name) return
+        label = name
+        selection = emptySet()
+        rebuild()
+    }
 
-    private fun buildLabels(): List<DownloadLabelUi> {
-        val defaultName = getString(R.string.default_download_label_name)
+    fun addLabel(name: String) {
+        if (!validateLabel(name, null)) return
+        DownloadManager.addLabel(name)
+        rebuild()
+    }
+
+    fun renameLabel(from: String, to: String) {
+        if (from == to) return
+        if (!validateLabel(to, from)) return
+        DownloadManager.renameLabel(from, to)
+        if (label == from) label = to
+        rebuild()
+    }
+
+    fun deleteLabel(name: String) {
+        DownloadManager.deleteLabel(name)
+        if (label == name) label = null
+        rebuild()
+    }
+
+    fun moveLabel(from: Int, to: Int) {
+        // 前两项是「全部」「默认」，真实标签从 0 开始
+        val realFrom = from - LABEL_OFFSET
+        val realTo = to - LABEL_OFFSET
+        if (realFrom < 0 || realTo < 0 || realFrom == realTo) return
+        DownloadManager.moveLabel(realFrom, realTo)
+        rebuild()
+    }
+
+    fun setDefaultLabel(hasDefault: Boolean, name: String?) {
+        Settings.putHasDefaultDownloadLabel(hasDefault)
+        if (hasDefault) {
+            Settings.putDefaultDownloadLabel(name)
+        }
+        rebuild()
+    }
+
+    fun buildLabels(): List<DownloadLabelUi> {
         val result = ArrayList<DownloadLabelUi>()
         result += DownloadLabelUi(
             name = null,
-            display = getString(R.string.download_all),
+            display = allLabelName,
             count = DownloadManager.allDownloadInfoList.size,
             selected = label == null,
             draggable = false,
         )
         result += DownloadLabelUi(
-            name = defaultName,
-            display = defaultName,
+            name = defaultLabelName,
+            display = defaultLabelName,
             count = DownloadManager.defaultDownloadInfoList.size,
-            selected = label == defaultName,
+            selected = label == defaultLabelName,
             draggable = false,
         )
         DownloadManager.labelList.forEach { downloadLabel ->
@@ -243,283 +402,73 @@ class DownloadsScene : EhComposeScene() {
         return result
     }
 
-    // region 列表派生
-
-    private fun rebuild() {
-        val defaultName = getString(R.string.default_download_label_name)
-        var raw: List<DownloadInfo> = when {
-            label == null -> DownloadManager.allDownloadInfoList
-            label == defaultName -> DownloadManager.defaultDownloadInfoList
-            else -> DownloadManager.getLabelDownloadInfoList(label) ?: run {
-                label = null
-                DownloadManager.allDownloadInfoList
-            }
-        }
-        // 与旧实现一致的 or 语义：关键字过滤与状态过滤共用同一个 mType 槽位
-        if (typeFilter != -1) {
-            val currentKeyword = keyword
-            raw = raw.filter {
-                currentKeyword != null && EhUtils.getSuitableTitle(it).contains(currentKeyword, true) ||
-                    it.state == typeFilter
-            }
-        }
-        infos = if (sort == 10) {
-            raw.shuffled()
-        } else {
-            raw.sortedWith(comparator)
-        }
-        version++
-        Settings.putRecentDownloadLabel(label)
-    }
-
-    private val comparator: Comparator<DownloadInfo> = Comparator { o1, o2 ->
-        val title1 = EhUtils.getSuitableTitle(o1)
-        val title2 = EhUtils.getSuitableTitle(o2)
-        when (sort) {
-            0 -> o2.time.compareTo(o1.time)
-            1 -> o1.time.compareTo(o2.time)
-            2 -> title1.compareTo(title2, true)
-            3 -> title2.compareTo(title1, true)
-            4 -> getAuthor(title1).compareTo(getAuthor(title2), true)
-            5 -> getAuthor(title2).compareTo(getAuthor(title1), true)
-            6 -> getName(title1).compareTo(getName(title2), true)
-            7 -> getName(title2).compareTo(getName(title1), true)
-            8 -> o1.category.compareTo(o2.category)
-            9 -> o2.category.compareTo(o1.category)
-            else -> 0
-        }
-    }
-
-    private fun handleArguments(args: Bundle?): Boolean {
-        args ?: return false
-        if (ACTION_CLEAR_DOWNLOAD_SERVICE == args.getString(KEY_ACTION)) {
-            clear()
-        }
-        val gid = args.getLong(KEY_GID, -1L)
-        if (gid != -1L) {
-            val info = DownloadManager.getDownloadInfo(gid) ?: return false
-            label = info.label
+    DownloadsScreen(
+        state = DownloadsUiState(
+            title = context.getString(R.string.scene_download_title, label ?: allLabelName),
+            items = infos.map { info ->
+                DownloadItemUi(
+                    gid = info.gid,
+                    title = EhUtils.getSuitableTitle(info),
+                    uploader = info.uploader,
+                    rating = info.rating,
+                    category = info.category,
+                    thumbUrl = info.thumb?.thumbUrl,
+                    state = info.state,
+                    legacy = info.legacy,
+                    finished = info.finished,
+                    total = info.total,
+                    speed = info.speed,
+                    label = info.label,
+                    selected = info.gid in selection,
+                )
+            },
+            labels = buildLabels(),
+            selectionMode = selection.isNotEmpty(),
+            selectedCount = selection.size,
+            sort = sort,
+            typeFilter = typeFilter,
+            keyword = keyword,
+            scrollToGid = scrollToGid,
+            version = version,
+        ),
+        onOpenNavDrawer = { host.toggleDrawer(GravityCompat.START) },
+        onToggleSelect = { gid -> selection = if (gid in selection) selection - gid else selection + gid },
+        onSelectAll = { selection = infos.map { it.gid }.toSet() },
+        onClearSelection = { selection = emptySet() },
+        onRead = ::readDownloaded,
+        onOpenDetail = ::openDetail,
+        onStartOne = ::startOne,
+        onStopOne = { DownloadManager.stopDownload(it) },
+        onPinTopSelected = ::pinTopSelected,
+        onStartSelected = ::startSelected,
+        onStopSelected = ::stopSelected,
+        onDeleteSelected = ::deleteSelected,
+        onMoveSelected = ::moveSelected,
+        onFilterType = {
+            typeFilter = it
+            keyword = null
             rebuild()
-            scrollToGid = gid
-            return true
-        }
-        return false
-    }
-
-    // endregion
-
-    // region 多选与操作
-
-    private fun toggleSelect(gid: Long) {
-        selection = if (gid in selection) selection - gid else selection + gid
-    }
-
-    private fun selectedInfos(): List<DownloadInfo> = infos.filter { it.gid in selection }
-
-    private fun pinTopSelected() {
-        val pinList = selectedInfos().reversed()
-        val now = System.currentTimeMillis()
-        pinList.forEachIndexed { index, info ->
-            info.time = now + index
-            EhDB.putDownloadInfo(info)
-        }
-        selection = emptySet()
-        rebuild()
-    }
-
-    private fun startSelected() {
-        val gids = LongList()
-        selectedInfos().forEach { gids.add(it.gid) }
-        if (gids.isEmpty()) return
-        val activity = mainActivity ?: return
-        val intent = Intent(activity, DownloadService::class.java)
-        intent.action = DownloadService.ACTION_START_RANGE
-        intent.putExtra(DownloadService.KEY_GID_LIST, gids)
-        ContextCompat.startForegroundService(activity, intent)
-        selection = emptySet()
-    }
-
-    private fun stopSelected() {
-        val gids = LongList()
-        selectedInfos().forEach { gids.add(it.gid) }
-        if (gids.isEmpty()) return
-        DownloadManager.stopRangeDownload(gids)
-        selection = emptySet()
-    }
-
-    private fun deleteSelected(removeFiles: Boolean) {
-        val list = selectedInfos()
-        if (list.isEmpty()) return
-        val gids = LongList()
-        list.forEach { gids.add(it.gid) }
-        selection = emptySet()
-        DownloadManager.deleteRangeDownload(gids)
-        Settings.putRemoveImageFiles(removeFiles)
-        if (removeFiles) {
-            val files = arrayOfNulls<UniFile>(list.size)
-            for ((index, info) in list.withIndex()) {
-                files[index] = SpiderDen.getGalleryDownloadDir(info.gid)
-                DownloadManager.removeDownloadDirname(info.gid)
-            }
-            lifecycleScope.launchIO {
-                runCatching { files.forEach { it?.delete() } }
-            }
-        }
-    }
-
-    private fun moveSelected(newLabel: String?) {
-        val list = selectedInfos()
-        if (list.isEmpty()) return
-        selection = emptySet()
-        DownloadManager.changeLabel(list, newLabel)
-        rebuild()
-    }
-
-    private fun startOne(gid: Long) {
-        val info = infos.firstOrNull { it.gid == gid } ?: return
-        val activity = mainActivity ?: return
-        val intent = Intent(activity, DownloadService::class.java)
-        intent.action = DownloadService.ACTION_START
-        intent.putExtra(DownloadService.KEY_GALLERY_INFO, info)
-        ContextCompat.startForegroundService(activity, intent)
-    }
-
-    private fun startAll() {
-        val activity = mainActivity ?: return
-        val intent = Intent(activity, DownloadService::class.java)
-        intent.action = DownloadService.ACTION_START_ALL
-        ContextCompat.startForegroundService(activity, intent)
-    }
-
-    private fun startAllReversed() {
-        val activity = mainActivity ?: return
-        val gids = LongList()
-        for (index in infos.indices.reversed()) {
-            val info = infos[index]
-            if (info.state != DownloadInfo.STATE_FINISH) {
-                gids.add(info.gid)
-            }
-        }
-        if (gids.isEmpty()) return
-        val intent = Intent(activity, DownloadService::class.java)
-        intent.action = DownloadService.ACTION_START_RANGE
-        intent.putExtra(DownloadService.KEY_GID_LIST, gids)
-        ContextCompat.startForegroundService(activity, intent)
-    }
-
-    private fun confirmResetReadingProgress() {
-        val ctx = context ?: return
-        AlertDialog.Builder(ctx)
-            .setMessage(R.string.reset_reading_progress_message)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                lifecycleScope.launchNonCancellable {
-                    DownloadManager.resetAllReadingProgress()
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun readDownloaded(gid: Long) {
-        val info = infos.firstOrNull { it.gid == gid } ?: return
-        val activity = mainActivity ?: return
-        val intent = Intent(activity, GalleryActivity::class.java)
-        intent.action = GalleryActivity.ACTION_EH
-        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, info)
-        startActivity(intent)
-    }
-
-    private fun openDetail(gid: Long) {
-        val info = infos.firstOrNull { it.gid == gid } ?: return
-        ehNavigator().push(EhRoute.GalleryDetail(gid = info.gid, token = info.token))
-    }
-
-    // endregion
-
-    // region 标签
-
-    private fun selectLabel(name: String?) {
-        if (label == name) return
-        label = name
-        selection = emptySet()
-        rebuild()
-    }
-
-    private fun addLabel(name: String) {
-        if (!validateLabel(name, null)) return
-        DownloadManager.addLabel(name)
-        rebuild()
-    }
-
-    private fun renameLabel(from: String, to: String) {
-        if (from == to) return
-        if (!validateLabel(to, from)) return
-        DownloadManager.renameLabel(from, to)
-        if (label == from) label = to
-        rebuild()
-    }
-
-    private fun deleteLabel(name: String) {
-        DownloadManager.deleteLabel(name)
-        if (label == name) label = null
-        rebuild()
-    }
-
-    private fun moveLabel(from: Int, to: Int) {
-        // 前两项是「全部」「默认」，真实标签从 0 开始
-        val realFrom = from - LABEL_OFFSET
-        val realTo = to - LABEL_OFFSET
-        if (realFrom < 0 || realTo < 0 || realFrom == realTo) return
-        DownloadManager.moveLabel(realFrom, realTo)
-        rebuild()
-    }
-
-    private fun setDefaultLabel(hasDefault: Boolean, name: String?) {
-        Settings.putHasDefaultDownloadLabel(hasDefault)
-        if (hasDefault) {
-            Settings.putDefaultDownloadLabel(name)
-        }
-        rebuild()
-    }
-
-    private fun validateLabel(name: String, self: String?): Boolean {
-        val defaultName = getString(R.string.default_download_label_name)
-        val allName = getString(R.string.download_all)
-        if (name == allName || name == defaultName) {
-            showTip(R.string.label_text_is_invalid, LENGTH_LONG)
-            return false
-        }
-        if (name != self && DownloadManager.containLabel(name)) {
-            showTip(R.string.label_text_exist, LENGTH_LONG)
-            return false
-        }
-        return true
-    }
-
-    // endregion
-
-    companion object {
-        const val KEY_GID = "gid"
-        const val KEY_ACTION = "action"
-        const val ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service"
-
-        private const val KEY_LABEL = "label"
-        private const val LABEL_OFFSET = 2
-
-        /** 标题关键字过滤借用 `mType` 槽位，取值与任何真实下载状态都不冲突 */
-        private const val FILTER_TYPE_TITLE = 5
-
-        private val PATTERN_AUTHOR = Regex("^(?:\\([^\\[\\]()]+\\))?\\s*\\[([^\\[\\]]+)]")
-        private val PATTERN_NAME = Regex("^(?:\\([^\\[\\]()]+\\))?\\s*(?:\\[[^\\[\\]]+])?\\s*(.+)")
-
-        private fun getAuthor(title: String): String {
-            val matcher = PATTERN_AUTHOR.find(title) ?: return ""
-            return matcher.groupValues[1].trim { it <= ' ' }
-        }
-
-        private fun getName(title: String): String {
-            val matcher = PATTERN_NAME.find(title) ?: return title
-            return matcher.groupValues[1].trim { it <= ' ' }
-        }
-    }
+        },
+        onFilterTitle = {
+            typeFilter = FILTER_TYPE_TITLE
+            keyword = it.lowercase()
+            rebuild()
+        },
+        onSort = {
+            sort = it
+            Settings.putDefaultSortingMethod(it)
+            rebuild()
+        },
+        onStartAll = ::startAll,
+        onStopAll = { DownloadManager.stopAllDownload() },
+        onStartAllReversed = ::startAllReversed,
+        onResetReadingProgress = ::confirmResetReadingProgress,
+        onSelectLabel = ::selectLabel,
+        onAddLabel = ::addLabel,
+        onRenameLabel = ::renameLabel,
+        onDeleteLabel = ::deleteLabel,
+        onMoveLabel = ::moveLabel,
+        onSetDefaultLabel = ::setDefaultLabel,
+        onScrollToGidDone = { scrollToGid = null },
+    )
 }

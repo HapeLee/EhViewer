@@ -17,16 +17,16 @@ package com.hippo.ehviewer.ui.scene
 
 import android.content.Context
 import android.content.Intent
-import android.os.Bundle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.view.GravityCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.cachedIn
@@ -35,7 +35,6 @@ import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.FavouriteStatusRouter
 import com.hippo.ehviewer.R
-import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.dao.HistoryInfo
@@ -43,32 +42,41 @@ import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.download.DownloadManager.DownloadInfoListener
 import com.hippo.ehviewer.ui.CommonOperations
 import com.hippo.ehviewer.ui.GalleryActivity
-import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.screen.HistoryActions
 import com.hippo.ehviewer.ui.compose.screen.HistoryScreen
+import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 import com.hippo.util.launchIO
 import com.hippo.util.withUIContext
 
 /**
  * 历史记录页。
  *
- * 迁移点：
- * - 分页仍走 Room 的 `historyLazyList`，但由 `collectAsLazyPagingItems()` 消费，
- *   `PagingDataAdapter`、`DiffUtil`、`ItemTouchHelper` 一并去掉
- * - 下载/收藏角标不是数据库里的字段，旧实现用 `notifyDataSetChanged` 全表刷新；
- *   这里用 [dataVersion] 计数驱动重组，效果等价
- * - 长按菜单里的读、下载、收藏、删除、移动标签仍调用原来的 `DownloadManager` /
- *   `CommonOperations`，只是入口换成 Compose 对话框
- * - 卡片进详情页不再带共享元素转场（`EnterGalleryDetailTransaction`），其余参数不变
+ * P7-c 出壳：不再是 Fragment，`onCreate` / `onDestroy` 里的监听注册改成
+ * [DisposableEffect]，`lifecycleScope` 换成 `rememberCoroutineScope`。
+ *
+ * 迁移点（沿用 P7-a 以来的做法）：
+ * - 分页仍走 Room 的 `historyLazyList`，由 `collectAsLazyPagingItems()` 消费
+ * - 下载 / 收藏角标不是数据库字段，用 `dataVersion` 计数驱动重组
+ * - 长按菜单各动作仍调用原来的 `DownloadManager` / `CommonOperations`
  */
-class HistoryScene : EhComposeScene() {
+@Composable
+fun HistoryScene() {
+    val context = LocalContext.current
+    // 收藏 / 下载这些动作要的是宿主 Activity，不是泛化的 Context
+    val activity = context as? MainActivity
+    val host = ehHostOrNoOp()
+    val navigator = ehNavigator()
+    val scope = rememberCoroutineScope()
+    val title = stringResource(R.string.history)
+    val defaultLabel = stringResource(R.string.default_download_label_name)
 
-    private var dataVersion by mutableStateOf(0)
-    private val historyFlow = Pager(PagingConfig(20)) { EhDB.historyLazyList }.flow
+    var dataVersion by remember { mutableIntStateOf(0) }
 
-    private val downloadInfoListener: DownloadInfoListener by lazy {
+    val historyFlow = remember { Pager(PagingConfig(20)) { EhDB.historyLazyList }.flow }
+    val downloadInfoListener = remember {
         object : DownloadInfoListener {
             override fun onAdd(info: DownloadInfo, list: List<DownloadInfo>, position: Int) {
                 dataVersion++
@@ -95,68 +103,84 @@ class HistoryScene : EhComposeScene() {
             override fun onUpdateLabels() {}
         }
     }
-
-    private val favouriteStatusRouterListener = FavouriteStatusRouter.Listener { _, _ ->
-        dataVersion++
+    val favouriteStatusRouterListener = remember {
+        FavouriteStatusRouter.Listener { _, _ -> dataVersion++ }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    DisposableEffect(downloadInfoListener, favouriteStatusRouterListener) {
         DownloadManager.addDownloadInfoListener(downloadInfoListener)
         EhApplication.favouriteStatusRouter.addListener(favouriteStatusRouterListener)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        DownloadManager.removeDownloadInfoListener(downloadInfoListener)
-        EhApplication.favouriteStatusRouter.removeListener(favouriteStatusRouterListener)
-    }
-
-    override fun getNavCheckedItem(): Int = R.id.nav_history
-
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.History> {
-            val flow = remember { historyFlow.cachedIn(lifecycleScope) }
-            val items = flow.collectAsLazyPagingItems()
-            HistoryScreen(
-                title = getString(R.string.history),
-                items = items,
-                actions = buildActions(),
-                version = dataVersion,
-                onOpenDrawer = { toggleDrawer(GravityCompat.START) },
-            )
+        onDispose {
+            DownloadManager.removeDownloadInfoListener(downloadInfoListener)
+            EhApplication.favouriteStatusRouter.removeListener(favouriteStatusRouterListener)
         }
     }
 
-    private fun buildActions(): HistoryActions {
-        val activity = mainActivity
-        val context = context
-        return HistoryActions(
+    fun downloadLabels(): List<String> {
+        val labelRawList = DownloadManager.labelList
+        val labels = ArrayList<String>(labelRawList.size + 1)
+        labels.add(defaultLabel)
+        labelRawList.forEach { info -> info.label?.let { labels.add(it) } }
+        return labels
+    }
+
+    fun moveLabel(gid: Long, index: Int) {
+        val downloadInfo = DownloadManager.getDownloadInfo(gid) ?: return
+        val labels = downloadLabels()
+        if (index !in labels.indices) return
+        // 下标 0 是默认标签，对应依赖里的 null
+        DownloadManager.changeLabel(listOf(downloadInfo), if (index == 0) null else labels[index])
+    }
+
+    fun deleteHistory(gi: GalleryInfo) {
+        scope.launchIO {
+            val info = gi as? HistoryInfo ?: return@launchIO
+            EhDB.deleteHistoryInfo(info)
+        }
+    }
+
+    fun clearHistory() {
+        scope.launchIO {
+            EhDB.clearHistoryInfo()
+            withUIContext { dataVersion++ }
+        }
+    }
+
+    fun openReader(gi: GalleryInfo) {
+        context.startActivity(
+            Intent(context, GalleryActivity::class.java).apply {
+                action = GalleryActivity.ACTION_EH
+                putExtra(GalleryActivity.KEY_GALLERY_INFO, gi)
+            },
+        )
+    }
+
+    fun openDetail(gi: GalleryInfo) {
+        navigator.push(EhRoute.GalleryDetail(gid = gi.gid, token = gi.token))
+    }
+
+    val actions = remember(context, navigator) {
+        HistoryActions(
             isDownloaded = { gi -> DownloadManager.containDownloadInfo(gi.gid) },
             isFavourited = { gi -> gi.favoriteSlot != -2 },
             downloadLabels = { downloadLabels() },
             onRead = { gi -> openReader(gi) },
             onOpenDetail = { gi -> openDetail(gi) },
-            onDownload = { gi ->
-                if (activity != null) {
-                    CommonOperations.startDownload(activity, gi, false)
-                }
-            },
+            onDownload = { gi -> activity?.let { CommonOperations.startDownload(it, gi, false) } },
             onRemoveDownload = { gi -> DownloadManager.deleteDownload(gi.gid) },
             onToggleFavorite = { gi ->
-                if (activity != null && context != null) {
+                activity?.let {
                     if (gi.favoriteSlot != -2) {
                         CommonOperations.removeFromFavorites(
-                            activity,
+                            it,
                             gi,
-                            RemoveFromFavoriteListener(context),
+                            RemoveFromFavoriteListener(it),
                         )
                     } else {
                         CommonOperations.addToFavorites(
-                            activity,
+                            it,
                             gi,
-                            AddToFavoriteListener(context),
+                            AddToFavoriteListener(it),
                             false,
                         )
                     }
@@ -168,72 +192,38 @@ class HistoryScene : EhComposeScene() {
         )
     }
 
-    private fun openReader(gi: GalleryInfo) {
-        val ctx = context ?: return
-        val intent = Intent(ctx, GalleryActivity::class.java).apply {
-            action = GalleryActivity.ACTION_EH
-            putExtra(GalleryActivity.KEY_GALLERY_INFO, gi)
-        }
-        startActivity(intent)
+    val flow = remember(historyFlow, scope) { historyFlow.cachedIn(scope) }
+    HistoryScreen(
+        title = title,
+        items = flow.collectAsLazyPagingItems(),
+        actions = actions,
+        version = dataVersion,
+        onOpenDrawer = { host.toggleDrawer(GravityCompat.START) },
+    )
+}
+
+private class AddToFavoriteListener(context: Context) :
+    EhCallback<GalleryListScene?, Unit>(context) {
+    override fun onSuccess(result: Unit) {
+        showTip(R.string.add_to_favorite_success, BaseScene.LENGTH_SHORT)
     }
 
-    private fun openDetail(gi: GalleryInfo) {
-        ehNavigator().push(EhRoute.GalleryDetail(gid = gi.gid, token = gi.token))
+    override fun onFailure(e: Exception) {
+        showTip(R.string.add_to_favorite_failure, BaseScene.LENGTH_LONG)
     }
 
-    private fun downloadLabels(): List<String> {
-        val labelRawList = DownloadManager.labelList
-        val labels = ArrayList<String>(labelRawList.size + 1)
-        labels.add(getString(R.string.default_download_label_name))
-        labelRawList.forEach { info -> info.label?.let { labels.add(it) } }
-        return labels
+    override fun onCancel() {}
+}
+
+private class RemoveFromFavoriteListener(context: Context) :
+    EhCallback<GalleryListScene?, Unit>(context) {
+    override fun onSuccess(result: Unit) {
+        showTip(R.string.remove_from_favorite_success, BaseScene.LENGTH_SHORT)
     }
 
-    private fun moveLabel(gid: Long, index: Int) {
-        val downloadInfo = DownloadManager.getDownloadInfo(gid) ?: return
-        val labels = downloadLabels()
-        if (index !in labels.indices) return
-        // 下标 0 是默认标签，对应依赖里的 null
-        DownloadManager.changeLabel(listOf(downloadInfo), if (index == 0) null else labels[index])
+    override fun onFailure(e: Exception) {
+        showTip(R.string.remove_from_favorite_failure, BaseScene.LENGTH_LONG)
     }
 
-    private fun deleteHistory(gi: GalleryInfo) {
-        lifecycleScope.launchIO {
-            val info = gi as? HistoryInfo ?: return@launchIO
-            EhDB.deleteHistoryInfo(info)
-        }
-    }
-
-    private fun clearHistory() {
-        lifecycleScope.launchIO {
-            EhDB.clearHistoryInfo()
-            withUIContext { dataVersion++ }
-        }
-    }
-
-    private class AddToFavoriteListener(context: Context) :
-        EhCallback<GalleryListScene?, Unit>(context) {
-        override fun onSuccess(result: Unit) {
-            showTip(R.string.add_to_favorite_success, LENGTH_SHORT)
-        }
-
-        override fun onFailure(e: Exception) {
-            showTip(R.string.add_to_favorite_failure, LENGTH_LONG)
-        }
-
-        override fun onCancel() {}
-    }
-
-    private class RemoveFromFavoriteListener(context: Context) :
-        EhCallback<GalleryListScene?, Unit>(context) {
-        override fun onSuccess(result: Unit) {
-            showTip(R.string.remove_from_favorite_success, LENGTH_SHORT)
-        }
-
-        override fun onFailure(e: Exception) {
-            showTip(R.string.remove_from_favorite_failure, LENGTH_LONG)
-        }
-
-        override fun onCancel() {}
-    }
+    override fun onCancel() {}
 }

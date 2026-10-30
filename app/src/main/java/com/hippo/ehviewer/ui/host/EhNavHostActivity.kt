@@ -19,7 +19,6 @@ import android.annotation.SuppressLint
 import android.app.assist.AssistContent
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -62,6 +61,8 @@ import com.hippo.ehviewer.ui.compose.nav.routeOf
 import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.compose.theme.EhTheme
 import com.hippo.ehviewer.ui.scene.CookieSignInScene
+import com.hippo.ehviewer.ui.scene.DownloadsScene
+import com.hippo.ehviewer.ui.scene.HistoryScene
 import com.hippo.ehviewer.ui.scene.SecurityScene
 import com.hippo.ehviewer.ui.scene.SelectSiteScene
 import com.hippo.ehviewer.ui.scene.SignInScene
@@ -169,15 +170,10 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
      * @return `true` for start scene
      */
     private fun startSceneFromIntent(intent: Intent): Boolean {
-        val clazzStr = intent.getStringExtra(KEY_SCENE_NAME) ?: return false
-        val clazz: Class<*> = try {
-            Class.forName(clazzStr)
-        } catch (e: ClassNotFoundException) {
-            Log.e(TAG, "Can't find class $clazzStr", e)
-            return false
-        }
+        // 页面出壳后已经没有类可反射，这里只认名字，映射交给 [onStartSceneFromIntent]
+        val sceneName = intent.getStringExtra(KEY_SCENE_NAME) ?: return false
         val args = intent.getBundleExtra(KEY_SCENE_ARGS)
-        val route = onStartSceneFromIntent(clazz, args) ?: return false
+        val route = onStartSceneFromIntent(sceneName, args) ?: return false
         pushRoute(route)
         return true
     }
@@ -195,9 +191,10 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
      * Start scene from `Intent`, it might be not safe,
      * Correct it here.
      *
+     * @param sceneName 旧协议里的 Scene 类名（页面出壳后仍保留原名，见 `EhRoutes`)
      * @return `null` for do not start scene
      */
-    protected open fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): EhRoute? = legacyRouteOf(clazz.name, args)
+    protected open fun onStartSceneFromIntent(sceneName: String, args: Bundle?): EhRoute? = legacyRouteOf(sceneName, args)
 
     /**
      * Can't recognize intent in first time `onCreate` and `onNewIntent`,
@@ -306,7 +303,6 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
         const val ACTION_START_SCENE = "start_scene"
         const val KEY_SCENE_NAME = "stage_activity_scene_name"
         const val KEY_SCENE_ARGS = "stage_activity_scene_args"
-        private val TAG = EhNavHostActivity::class.java.simpleName
     }
 }
 
@@ -370,10 +366,11 @@ private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStac
             entry<EhRoute.CookieSignIn> { CookieSignInScene() }
             entry<EhRoute.WebViewSignIn> { WebViewSignInScene() }
             entry<EhRoute.Security> { SecurityScene(it) }
+            entry<EhRoute.History> { HistoryScene() }
+            entry<EhRoute.Downloads> { DownloadsScene(it) }
 
             // 迁移期其余页面仍是旧 Scene，统一走兼容承载（P7-c 后逐条替换）
             entry<EhRoute.Favorites> { CompatSceneEntry(it) }
-            entry<EhRoute.History> { CompatSceneEntry(it) }
             entry<EhRoute.Downloads> { CompatSceneEntry(it) }
             entry<EhRoute.GalleryList> { CompatSceneEntry(it) }
             entry<EhRoute.GalleryDetail> { CompatSceneEntry(it) }

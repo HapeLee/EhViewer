@@ -36,8 +36,11 @@ import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.compose.nav.KEY_SCENE_DOWNLOAD_ACTION
+import com.hippo.ehviewer.ui.compose.nav.KEY_SCENE_DOWNLOAD_GID
+import com.hippo.ehviewer.ui.compose.nav.SCENE_DOWNLOAD_ACTION_CLEAR_SERVICE
+import com.hippo.ehviewer.ui.compose.nav.SCENE_NAME_DOWNLOADS
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
-import com.hippo.ehviewer.ui.scene.DownloadsScene
 import com.hippo.util.ReadableTime
 import com.hippo.util.getParcelableExtraCompat
 import com.hippo.yorozuya.FileUtils
@@ -188,10 +191,10 @@ class DownloadService :
         clearIntent.action = ACTION_CLEAR
         val piClear = PendingIntent.getService(this, 0, clearIntent, PendingIntent.FLAG_IMMUTABLE)
         val bundle = Bundle()
-        bundle.putString(DownloadsScene.KEY_ACTION, DownloadsScene.ACTION_CLEAR_DOWNLOAD_SERVICE)
+        bundle.putString(KEY_SCENE_DOWNLOAD_ACTION, SCENE_DOWNLOAD_ACTION_CLEAR_SERVICE)
         val activityIntent = Intent(this, MainActivity::class.java)
         activityIntent.action = EhNavHostActivity.ACTION_START_SCENE
-        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, SCENE_NAME_DOWNLOADS)
         activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService,
@@ -245,10 +248,10 @@ class DownloadService :
         }
         ensureDownloadingBuilder()
         val bundle = Bundle()
-        bundle.putLong(DownloadsScene.KEY_GID, info.gid)
+        bundle.putLong(KEY_SCENE_DOWNLOAD_GID, info.gid)
         val activityIntent = Intent(this, MainActivity::class.java)
         activityIntent.action = EhNavHostActivity.ACTION_START_SCENE
-        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, SCENE_NAME_DOWNLOADS)
         activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService,

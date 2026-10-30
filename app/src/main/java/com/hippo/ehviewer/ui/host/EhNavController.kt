@@ -18,6 +18,7 @@ package com.hippo.ehviewer.ui.host
 import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.ui.compose.nav.EhNavigator
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.navSlot
 
 /**
  * 全应用唯一的返回栈。
@@ -114,11 +115,15 @@ class EhNavController internal constructor(
 
     override fun push(route: EhRoute) {
         apply { stack ->
-            val existing = stack.indexOf(route)
+            val existing = stack.indexOfFirst { it.navSlot == route.navSlot }
             if (existing >= 0) {
                 // 同一个页面已在栈里（SINGLE_TASK）：上面的全弹掉，不重复压栈
                 while (stack.size > existing + 1) {
                     stack.removeAt(stack.lastIndex)
+                }
+                // 参数变了（比如下载页换了 gid）就把这一跳的内容换掉
+                if (stack[existing] != route) {
+                    stack[existing] = route
                 }
             } else {
                 stack.add(route)

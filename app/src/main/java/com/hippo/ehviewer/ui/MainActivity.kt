@@ -67,20 +67,7 @@ import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import com.hippo.ehviewer.ui.scene.BaseScene
-import com.hippo.ehviewer.ui.scene.CookieSignInScene
-import com.hippo.ehviewer.ui.scene.DownloadsScene
-import com.hippo.ehviewer.ui.scene.FavoritesScene
-import com.hippo.ehviewer.ui.scene.GalleryCommentsScene
-import com.hippo.ehviewer.ui.scene.GalleryDetailScene
-import com.hippo.ehviewer.ui.scene.GalleryInfoScene
 import com.hippo.ehviewer.ui.scene.GalleryListScene
-import com.hippo.ehviewer.ui.scene.GalleryPreviewsScene
-import com.hippo.ehviewer.ui.scene.HistoryScene
-import com.hippo.ehviewer.ui.scene.ProgressScene
-import com.hippo.ehviewer.ui.scene.SecurityScene
-import com.hippo.ehviewer.ui.scene.SelectSiteScene
-import com.hippo.ehviewer.ui.scene.SignInScene
-import com.hippo.ehviewer.ui.scene.WebViewSignInScene
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.unifile.UniFile
@@ -189,7 +176,7 @@ class MainActivity :
     }
 
     /** 下载通知等外部入口：旧参数还原成 route，守卫链由宿主统一跑 */
-    override fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): EhRoute? = legacyRouteOf(clazz.name, args) ?: homepageRoute()
+    override fun onStartSceneFromIntent(sceneName: String, args: Bundle?): EhRoute? = legacyRouteOf(sceneName, args) ?: homepageRoute()
 
     override fun setupContent(savedInstanceState: Bundle?) {
         connectivityManager = getSystemService()!!

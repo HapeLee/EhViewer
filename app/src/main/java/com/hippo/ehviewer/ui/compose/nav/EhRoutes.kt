@@ -22,14 +22,12 @@ import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.data.ListUrlBuilder
-import com.hippo.ehviewer.ui.scene.DownloadsScene
 import com.hippo.ehviewer.ui.scene.FavoritesScene
 import com.hippo.ehviewer.ui.scene.GalleryCommentsScene
 import com.hippo.ehviewer.ui.scene.GalleryDetailScene
 import com.hippo.ehviewer.ui.scene.GalleryInfoScene
 import com.hippo.ehviewer.ui.scene.GalleryListScene
 import com.hippo.ehviewer.ui.scene.GalleryPreviewsScene
-import com.hippo.ehviewer.ui.scene.HistoryScene
 import com.hippo.ehviewer.ui.scene.ProgressScene
 import com.hippo.ehviewer.ui.scene.ReaderScene
 import com.hippo.scene.Announcer
@@ -187,6 +185,18 @@ fun gidOf(route: EhRoute): Long? = when (route) {
     -> null
 }
 
+/** 下载页的旧 Scene 名。类已经删了，名字留给下载服务的通知 Intent 用 */
+const val SCENE_NAME_DOWNLOADS = "com.hippo.ehviewer.ui.scene.DownloadsScene"
+
+/** 下载页 Intent 里「定位到某一项」的 key */
+const val KEY_SCENE_DOWNLOAD_GID = "gid"
+
+/** 下载页 Intent 里「顺带做什么」的 key */
+const val KEY_SCENE_DOWNLOAD_ACTION = "action"
+
+/** 下载页 Intent：清掉已完成的下载服务 */
+const val SCENE_DOWNLOAD_ACTION_CLEAR_SERVICE = "clear_download_service"
+
 /**
  * route → 还需要 `CompatSceneEntry` 承载的旧 Scene 类名；已经出壳的页面返回 `null`。
  *
@@ -194,13 +204,12 @@ fun gidOf(route: EhRoute): Long? = when (route) {
  * `com.hippo.scene` 就能一起删掉（P7-e）。
  */
 fun compatSceneClassNameOf(route: EhRoute): String? = when (route) {
-    // 守卫链三页 + 两种登录子页已经出壳，不再需要 Fragment
+    // 已经出壳的页面不再需要 Fragment
     is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
-    EhRoute.CookieSignIn, EhRoute.WebViewSignIn,
+    EhRoute.CookieSignIn, EhRoute.WebViewSignIn, EhRoute.History,
+    is EhRoute.Downloads,
     -> null
-    is EhRoute.Downloads -> DownloadsScene::class.java.name
     EhRoute.Favorites -> FavoritesScene::class.java.name
-    EhRoute.History -> HistoryScene::class.java.name
     is EhRoute.GalleryList -> GalleryListScene::class.java.name
     is EhRoute.GalleryDetail -> GalleryDetailScene::class.java.name
     is EhRoute.GalleryInfo -> GalleryInfoScene::class.java.name
@@ -233,14 +242,8 @@ fun EhRoute.toLegacyArgs(detail: GalleryDetail? = null): Bundle = when (this) {
     EhRoute.CookieSignIn, EhRoute.WebViewSignIn, EhRoute.Favorites, EhRoute.History,
     is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
     -> Bundle()
-    is EhRoute.Downloads -> Bundle().apply {
-        if (gid != -1L) {
-            putLong(DownloadsScene.KEY_GID, gid)
-        }
-        if (clearService) {
-            putString(DownloadsScene.KEY_ACTION, DownloadsScene.ACTION_CLEAR_DOWNLOAD_SERVICE)
-        }
-    }
+    // 下载页靠 Intent 起，不靠 arguments 起（见 [SCENE_NAME_DOWNLOADS]）
+    is EhRoute.Downloads -> Bundle()
     is EhRoute.GalleryList -> Bundle().apply {
         val targetAction = query.action ?: LIST_URL_BUILDER_ACTION
         putString(GalleryListScene.KEY_ACTION, targetAction)
@@ -290,10 +293,9 @@ fun EhRoute.toLegacyArgs(detail: GalleryDetail? = null): Bundle = when (this) {
  */
 fun legacyRouteOf(sceneClassName: String, args: Bundle?): EhRoute? = when (sceneClassName) {
     FavoritesScene::class.java.name -> EhRoute.Favorites
-    HistoryScene::class.java.name -> EhRoute.History
-    DownloadsScene::class.java.name -> EhRoute.Downloads(
-        gid = args?.getLong(DownloadsScene.KEY_GID, -1L) ?: -1L,
-        clearService = DownloadsScene.ACTION_CLEAR_DOWNLOAD_SERVICE == args?.getString(DownloadsScene.KEY_ACTION),
+    SCENE_NAME_DOWNLOADS -> EhRoute.Downloads(
+        gid = args?.getLong(KEY_SCENE_DOWNLOAD_GID, -1L) ?: -1L,
+        clearService = SCENE_DOWNLOAD_ACTION_CLEAR_SERVICE == args?.getString(KEY_SCENE_DOWNLOAD_ACTION),
     )
     ReaderScene::class.java.name -> EhRoute.Reader()
     ProgressScene::class.java.name -> EhRoute.Progress(

@@ -1,7 +1,8 @@
 # 应用级导航宿主方案（P7）
 
-> 状态：P7-a、P7-b 前置（宿主接口隔离）、P7-b 主体（宿主换 NavDisplay）与 P7-c 第一子片
-> （登录 / 守卫组出壳）已落地（见第 10 节）；P7-c 剩余页面与 P7-d / P7-e 仍是设计稿。
+> 状态：P7-a、P7-b 前置（宿主接口隔离）、P7-b 主体（宿主换 NavDisplay）、P7-c 第一子片
+> （登录 / 守卫组出壳）与第二子片（历史 / 下载出壳）已落地（见第 10 节）；
+> P7-c 剩余页面（收藏、画廊列表、详情族、阅读器）与 P7-d / P7-e 仍是设计稿。
 > 前置：15 个 Scene 已全部迁到 `EhComposeScene`，XML Scene 清零（见 `compose-kotlin-refactor-plan.md` 第 2 节）。
 > 目标：把「Activity 场景栈 + 每页内部 Nav3 栈」收敛成「单 Activity + 单一 Nav3 栈」，然后删除 `com.hippo.scene`。
 
@@ -306,3 +307,48 @@ fragment 由 `FragmentFactory` 反射创建，入参由 `route.toLegacyArgs(cach
   旋转不再丢（旧实现只有重试次数存了 `onSaveInstanceState`）。
 
 验证：四道门禁全绿，无新增编译告警；`nav` 包单测仍 14 个。
+
+### 10.9 P7-c 第二子片：历史 / 下载出壳（第六个落地片）
+
+`HistoryScene` / `DownloadsScene` 也变成 `@Composable`，注册进宿主 `entryProvider`。
+
+生命周期回调的对应关系：
+
+| 旧（`SceneFragment`） | 新（`@Composable`） |
+|---|---|
+| `onCreate` 里注册监听 | `DisposableEffect { add; onDispose { remove } }` |
+| `onDestroy` 反注册 | 同上 `onDispose` |
+| `onSaveInstanceState` | `rememberSaveable` |
+| `onBackPressed` 里退出多选 | `BackHandler(enabled = 有选中)` |
+| `onNewArguments` 换参数 | route 换新（见下） |
+| `onResume` 同步 `listMode` | `OnHostResume { }` |
+
+**下载页的 Intent 协议从「类名」解耦**。下载页是唯一还靠外部 Intent 起页面的场景
+（通知栏「清掉服务」「跳到某项」），原来 Intent 里塞的是 `DownloadsScene::class.java.name`，
+`startSceneFromIntent` 再用 `Class.forName` 反射一次。页面出壳后类没了，于是：
+
+- `EhRoutes.kt` 新增 `SCENE_NAME_DOWNLOADS` / `KEY_SCENE_DOWNLOAD_GID` /
+  `KEY_SCENE_DOWNLOAD_ACTION` / `SCENE_DOWNLOAD_ACTION_CLEAR_SERVICE` 四个常量，
+  名字是写死的字符串（值仍是原来的类名），由 `legacyRouteOf` 映射成 `EhRoute.Downloads`。
+- `EhNavHostActivity.onStartSceneFromIntent` 的入参从 `Class<*>` 换成 `String`，
+  宿主里最后一次 `Class.forName` 消失。
+
+**`SINGLE_TASK` 语义补回来**：`EhRoute` 新增 `navSlot`，`EhNavController.push` 按
+`navSlot` 而不是 `equals` 找「同一页」。下载页的 `navSlot` 恒为 `"Downloads"`
+（忽略 `gid`），其余页面取 `toString()`——这样不同查询的列表页、不同 gid 的详情页
+仍然各自算不同页，而通知栏带新 `gid` 再进来是**回到已有那份并换参数**，
+不是叠第二层。
+
+`navCheckedItem` 也从「恒为 0」补成真值：`Favorites` → `nav_favourite`、
+`History` → `nav_history`、`Downloads` → `nav_downloads`。
+
+**下一片的阻塞点（已查清）**：`FavoritesScene` 用 `EhRequest.enqueue(this)` 加
+`inner class` 回调（回调要读 `taskId`、调 `loadLocal`），还依赖
+`MaterialDatePicker.show(requireActivity().supportFragmentManager, ...)`。
+`EhRequest` 已有 `enqueue(scope: CoroutineScope)` 重载，所以路径是
+「回调类提成顶层 + 传 scope + 用 `taskId` 校验」，日期选择器换成 Compose 对话框。
+`GalleryListScene` 的 `getNavCheckedItem()` 是动态的（跟着站点 / 模式走），
+出壳时要一并把这份派生搬到 route 上。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。

@@ -15,7 +15,9 @@
  */
 package com.hippo.ehviewer.ui.compose.nav
 
+import androidx.annotation.IdRes
 import androidx.navigation3.runtime.NavKey
+import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.ListUrlBuilder
 import kotlinx.serialization.Serializable
@@ -164,12 +166,30 @@ val EhRoute.hasLeftDrawer: Boolean
     }
 
 /**
+ * SINGLE_TASK 的匹配槽位：同一个槽位视为「同一页」。
+ *
+ * 绝大多数页面参数不同就是不同页面，槽位取 `toString()`；下载页是例外——
+ * 通知栏带 `gid` 二次进入不该再叠一层，而应回到已有那份并换掉参数。
+ */
+val EhRoute.navSlot: String
+    get() = when (this) {
+        is EhRoute.Downloads -> "Downloads"
+        else -> toString()
+    }
+
+/**
  * 该页面对应的抽屉勾选项（原 `BaseScene.getNavCheckedItem()`）。
  *
- * 列表 / 收藏 / 历史 / 下载页会按自己的状态再覆盖一次，这里只给默认值。
+ * 画廊列表页是动态的（跟着当前站点 / 模式走），出壳前仍由 `GalleryListScene` 自己设置，
+ * 这里先给 0。
  */
 val EhRoute.navCheckedItem: Int
-    get() = 0
+    @IdRes get() = when (this) {
+        EhRoute.Favorites -> R.id.nav_favourite
+        EhRoute.History -> R.id.nav_history
+        is EhRoute.Downloads -> R.id.nav_downloads
+        else -> 0
+    }
 
 /**
  * 画廊列表的查询条件。
