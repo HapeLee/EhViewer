@@ -15,53 +15,68 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.os.Bundle
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.Composable
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.fragment.app.FragmentActivity
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
-import com.hippo.ehviewer.ui.compose.EhComposeScene
 import com.hippo.ehviewer.ui.compose.nav.CHECK_STEP_SECURITY
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.nextCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.targetOf
 import com.hippo.ehviewer.ui.compose.screen.SecurityScreen
+import com.hippo.ehviewer.ui.host.OnHostResume
 import com.hippo.widget.lockpattern.LockPatternUtils
 import com.hippo.widget.lockpattern.LockPatternView
-import com.hippo.yorozuya.ObjectUtils
 import java.util.concurrent.Executors
 
+private const val MAX_RETRY_TIMES = 5
+
 /**
- * 手势锁页。
+ * 手势锁页（守卫链的第一站）。
  *
- * 迁移点：
- * - 布局容器换成 Compose，[LockPatternView] 本身原样保留（图案绘制/手势解析不动）
- * - 指纹提示、重试次数、成功后的 `CHECK_STEP_SECURITY` 流程与原来一致
+ * P7-c 出壳：不再是 `EhComposeScene` 的子类，也不再套一层内部 `NavDisplay`；
+ * 整个页面就是挂在宿主返回栈上的一个 @Composable。
+ * 图案绘制与手势识别仍由 [LockPatternView] 负责，指纹提示时机与重试上限保持原样。
  */
-class SecurityScene : EhComposeScene() {
+@Composable
+fun SecurityScene(route: EhRoute.Security) {
+    val context = LocalContext.current
+    val navigator = ehNavigator()
+    var patternView by remember { mutableStateOf<LockPatternView?>(null) }
+    var retryTimes by rememberSaveable { mutableIntStateOf(MAX_RETRY_TIMES) }
+    val appName = stringResource(R.string.app_name)
 
-    private var patternView: LockPatternView? = null
-    private var canAuthenticate = false
-    private var retryTimes = MAX_RETRY_TIMES
-    private var promptInfo: BiometricPrompt.PromptInfo? = null
-    private var biometricPrompt: BiometricPrompt? = null
-
-    override fun needShowLeftDrawer(): Boolean = false
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val context = requireContext()
-        retryTimes = savedInstanceState?.getInt(KEY_RETRY_TIMES) ?: MAX_RETRY_TIMES
-        canAuthenticate = Settings.enableFingerprint &&
+    val canAuthenticate = remember {
+        Settings.enableFingerprint &&
             BiometricManager.from(context)
                 .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
             BiometricManager.BIOMETRIC_SUCCESS
-        biometricPrompt = BiometricPrompt(
-            this,
+    }
+
+    val unlock = remember(navigator, route) {
+        { navigator.replaceTop(nextCheckRoute(CHECK_STEP_SECURITY, targetOf(route))) }
+    }
+    val promptInfo = remember(context, appName) {
+        BiometricPrompt.PromptInfo.Builder()
+            .setTitle(appName)
+            .setNegativeButtonText(context.getString(android.R.string.cancel))
+            .setConfirmationRequired(false)
+            .build()
+    }
+    val prompt = remember(context, unlock) {
+        BiometricPrompt(
+            context as FragmentActivity,
             Executors.newSingleThreadExecutor(),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(
@@ -71,67 +86,29 @@ class SecurityScene : EhComposeScene() {
                 }
             },
         )
-        promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(getString(R.string.app_name))
-            .setNegativeButtonText(getString(android.R.string.cancel))
-            .setConfirmationRequired(false)
-            .build()
+    }
+    val startPrompt = remember(prompt, promptInfo, canAuthenticate) {
+        { if (canAuthenticate) prompt.authenticate(promptInfo) }
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (canAuthenticate) {
-            startBiometricPrompt()
-        }
-    }
+    // 进入前台自动拉起指纹（对应旧的 `onResume()`）
+    OnHostResume(startPrompt)
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putInt(KEY_RETRY_TIMES, retryTimes)
-    }
-
-    override fun onDestroyView() {
-        patternView = null
-        super.onDestroyView()
-    }
-
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.Security> {
-            SecurityScreen(
-                canAuthenticate = canAuthenticate,
-                onPatternDetected = ::onPatternDetected,
-                onViewCreated = { patternView = it },
-                onBiometricClick = ::startBiometricPrompt,
-            )
-        }
-    }
-
-    private fun startBiometricPrompt() {
-        biometricPrompt?.authenticate(promptInfo ?: return)
-    }
-
-    private fun onPatternDetected(pattern: List<LockPatternView.Cell>) {
-        val view = patternView ?: return
-        if (mainActivity == null) return
-        val enteredPattern = LockPatternUtils.patternToString(pattern)
-        if (ObjectUtils.equal(enteredPattern, Settings.security)) {
-            unlock()
-        } else {
-            view.setDisplayMode(LockPatternView.DisplayMode.Wrong)
-            retryTimes--
-            if (retryTimes <= 0) {
-                finish()
+    SecurityScreen(
+        canAuthenticate = canAuthenticate,
+        onPatternDetected = { pattern ->
+            val view = patternView ?: return@SecurityScreen
+            if (LockPatternUtils.patternToString(pattern) == Settings.security) {
+                unlock()
+            } else {
+                view.setDisplayMode(LockPatternView.DisplayMode.Wrong)
+                retryTimes--
+                if (retryTimes <= 0) {
+                    navigator.pop()
+                }
             }
-        }
-    }
-
-    private fun unlock() {
-        ehNavigator().replaceTop(nextCheckRoute(CHECK_STEP_SECURITY, targetOf(ehRoute)))
-    }
-
-    companion object {
-        private const val KEY_RETRY_TIMES = "retry_times"
-        private const val MAX_RETRY_TIMES = 5
-    }
+        },
+        onViewCreated = { patternView = it },
+        onBiometricClick = startPrompt,
+    )
 }

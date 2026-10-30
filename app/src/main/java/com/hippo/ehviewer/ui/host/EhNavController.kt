@@ -31,6 +31,8 @@ import com.hippo.ehviewer.ui.compose.nav.EhRoute
  */
 class EhNavController internal constructor(
     internal val entries: MutableList<NavKey>,
+    /** 弹到栈底还想再弹 = 收掉整个宿主（与旧 `StageActivity.finishScene` 一致） */
+    private val onFinishStage: () -> Unit = {},
 ) : EhNavigator {
     private var attached: MutableList<EhRoute>? = null
     private val pending = ArrayDeque<(MutableList<EhRoute>) -> Unit>()
@@ -128,6 +130,8 @@ class EhNavController internal constructor(
         apply { stack ->
             if (stack.size > 1) {
                 stack.removeAt(stack.lastIndex)
+            } else {
+                onFinishStage()
             }
         }
     }

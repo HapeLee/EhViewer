@@ -19,10 +19,11 @@ import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.lifecycleScope
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
+import androidx.compose.ui.platform.LocalContext
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhCookieStore
@@ -31,13 +32,13 @@ import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.exception.CloudflareBypassException
 import com.hippo.ehviewer.ui.WebViewActivity
-import com.hippo.ehviewer.ui.compose.EhComposeScene
-import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.NavResultBus
 import com.hippo.ehviewer.ui.compose.nav.NavSignal
 import com.hippo.ehviewer.ui.compose.nav.SignInSource
+import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.screen.CookieSignInError
 import com.hippo.ehviewer.ui.compose.screen.CookieSignInScreen
+import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 import com.hippo.network.StatusCodeException
 import com.hippo.util.ExceptionUtils
 import com.hippo.util.getClipboardManager
@@ -45,81 +46,78 @@ import com.hippo.util.getTextFromClipboard
 import com.hippo.util.launchIO
 import com.hippo.util.withUIContext
 import java.util.Locale
-import kotlinx.coroutines.Job
 import okhttp3.Cookie
 
 /**
  * Cookie 登录页。
  *
- * 迁移点：
- * - 表单、进度遮罩、错误对话框交给 [CookieSignInScreen]，输入与错误态用 Compose 状态
- * - 登录协程改挂 `lifecycleScope`，旋转不会丢请求；`storeCookie` 与 Cloudflare 判定不变
- * - 「从剪贴板填充」逻辑原样保留，只是把结果写进 Compose 状态后自动提交
+ * P7-c 出壳：表单、进度遮罩、错误对话框仍是 [CookieSignInScreen]，
+ * 但页面本身不再有 Fragment；登录协程挂 `rememberCoroutineScope`，
+ * `storeCookie` 与 Cloudflare 判定不变。
+ * 「从剪贴板填充」逻辑原样保留，只是把结果写进组合状态后自动提交。
  */
-class CookieSignInScene : EhComposeScene() {
+@Composable
+fun CookieSignInScene() {
+    val context = LocalContext.current
+    val navigator = ehNavigator()
+    val host = ehHostOrNoOp()
+    val scope = rememberCoroutineScope()
 
-    private var memberId by mutableStateOf("")
-    private var passHash by mutableStateOf("")
-    private var memberIdError by mutableStateOf<String?>(null)
-    private var passHashError by mutableStateOf<String?>(null)
-    private var loading by mutableStateOf(false)
-    private var error by mutableStateOf<CookieSignInError?>(null)
-    private var signInJob: Job? = null
+    var memberId by rememberSaveable { mutableStateOf("") }
+    var passHash by rememberSaveable { mutableStateOf("") }
+    var memberIdError by remember { mutableStateOf<String?>(null) }
+    var passHashError by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<CookieSignInError?>(null) }
 
-    override fun needShowLeftDrawer(): Boolean = false
-
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.CookieSignIn> {
-            CookieSignInScreen(
-                memberId = memberId,
-                passHash = passHash,
-                memberIdError = memberIdError,
-                passHashError = passHashError,
-                loading = loading,
-                error = error,
-                onMemberIdChange = {
-                    memberId = it
-                    memberIdError = null
-                },
-                onPassHashChange = {
-                    passHash = it
-                    passHashError = null
-                },
-                onSubmit = ::enter,
-                onFillFromClipboard = ::fillCookiesFromClipboard,
-                onDismissError = { error = null },
-                onOpenForums = {
-                    context?.startActivity(
-                        WebViewActivity.newIntent(requireContext(), EhUrl.URL_FORUMS),
-                    )
-                },
-                onIgnoreError = {
-                    error = null
-                    ok()
-                },
-            )
-        }
+    suspend fun storeCookie(id: String, hash: String) {
+        fun newCookie(name: String, value: String, domain: String): Cookie = Cookie.Builder().name(name).value(value)
+            .domain(domain).expiresAt(Long.MAX_VALUE).build()
+        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_MEMBER_ID, id, EhUrl.DOMAIN_E))
+        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_MEMBER_ID, id, EhUrl.DOMAIN_EX))
+        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_PASS_HASH, hash, EhUrl.DOMAIN_E))
+        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_PASS_HASH, hash, EhUrl.DOMAIN_EX))
     }
 
-    private fun enter() {
-        if (signInJob?.isActive == true || loading) return
+    fun ok() {
+        // cookie 已落 EhCookieStore、资料已落 Settings；这里只通知父页面收尾
+        NavResultBus.publish(NavSignal.SignedIn(SignInSource.COOKIE))
+        navigator.pop()
+    }
+
+    fun showResultError(e: Throwable) {
+        val isCloudflareError = e.cause is CloudflareBypassException ||
+            (e is StatusCodeException && e.responseCode == 403)
+        val message = buildString {
+            append(ExceptionUtils.getReadableString(e))
+            append("\n\n")
+            append(context.getString(R.string.sign_in_failed_tip))
+            if (isCloudflareError) {
+                append("\n\n")
+                append(context.getString(R.string.sign_in_failed_tip_2))
+            }
+        }
+        error = CookieSignInError(message = message, canIgnore = isCloudflareError)
+    }
+
+    fun enter() {
+        if (loading) return
         val id = memberId.trim()
         val hash = passHash.trim()
         if (id.isEmpty()) {
-            memberIdError = getString(R.string.text_is_empty)
+            memberIdError = context.getString(R.string.text_is_empty)
             return
         }
         memberIdError = null
         if (hash.isEmpty()) {
-            passHashError = getString(R.string.text_is_empty)
+            passHashError = context.getString(R.string.text_is_empty)
             return
         }
         passHashError = null
-        hideSoftInput()
+        host.hideSoftInput()
         loading = true
 
-        signInJob = lifecycleScope.launchIO {
+        scope.launchIO {
             EhUtils.signOut()
             val result = runCatching {
                 storeCookie(id, hash)
@@ -133,48 +131,17 @@ class CookieSignInScene : EhComposeScene() {
                 result.onSuccess {
                     ok()
                 }.onFailure {
-                    showResultErrorDialog(it)
+                    showResultError(it)
                 }
             }
         }
     }
 
-    private fun ok() {
-        // cookie 已落 EhCookieStore、资料已落 Settings；这里只通知父页面收尾
-        NavResultBus.publish(NavSignal.SignedIn(SignInSource.COOKIE))
-        finish()
-    }
+    fun fillCookiesFromClipboard() {
+        fun showClipboardError() = host.showTip(R.string.from_clipboard_error, BaseScene.LENGTH_SHORT)
+        host.hideSoftInput()
 
-    private fun showResultErrorDialog(e: Throwable) {
-        val isCloudflareError = e.cause is CloudflareBypassException ||
-            (e is StatusCodeException && e.responseCode == 403)
-        val message = buildString {
-            append(ExceptionUtils.getReadableString(e))
-            append("\n\n")
-            append(getString(R.string.sign_in_failed_tip))
-            if (isCloudflareError) {
-                append("\n\n")
-                append(getString(R.string.sign_in_failed_tip_2))
-            }
-        }
-        error = CookieSignInError(message = message, canIgnore = isCloudflareError)
-    }
-
-    private suspend fun storeCookie(id: String, hash: String) {
-        fun newCookie(name: String, value: String, domain: String): Cookie = Cookie.Builder().name(name).value(value)
-            .domain(domain).expiresAt(Long.MAX_VALUE).build()
-        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_MEMBER_ID, id, EhUrl.DOMAIN_E))
-        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_MEMBER_ID, id, EhUrl.DOMAIN_EX))
-        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_PASS_HASH, hash, EhUrl.DOMAIN_E))
-        EhCookieStore.addCookie(newCookie(EhCookieStore.KEY_IPB_PASS_HASH, hash, EhUrl.DOMAIN_EX))
-    }
-
-    private fun fillCookiesFromClipboard() {
-        val ctx = context ?: return
-        fun showClipboardError() = showTip(R.string.from_clipboard_error, LENGTH_SHORT)
-        hideSoftInput()
-
-        val clipboardText = ctx.getClipboardManager().getTextFromClipboard(ctx)
+        val clipboardText = context.getClipboardManager().getTextFromClipboard(context)
         if (clipboardText.isNullOrBlank()) {
             showClipboardError()
             return
@@ -213,12 +180,35 @@ class CookieSignInScene : EhComposeScene() {
             enter()
         } catch (e: Exception) {
             ExceptionUtils.throwIfFatal(e)
-            Log.e(TAG, "Error", e)
+            Log.e("CookieSignInScene", "Error", e)
             showClipboardError()
         }
     }
 
-    companion object {
-        private const val TAG = "CookieSignInScene"
-    }
+    CookieSignInScreen(
+        memberId = memberId,
+        passHash = passHash,
+        memberIdError = memberIdError,
+        passHashError = passHashError,
+        loading = loading,
+        error = error,
+        onMemberIdChange = {
+            memberId = it
+            memberIdError = null
+        },
+        onPassHashChange = {
+            passHash = it
+            passHashError = null
+        },
+        onSubmit = ::enter,
+        onFillFromClipboard = ::fillCookiesFromClipboard,
+        onDismissError = { error = null },
+        onOpenForums = {
+            context.startActivity(WebViewActivity.newIntent(context, EhUrl.URL_FORUMS))
+        },
+        onIgnoreError = {
+            error = null
+            ok()
+        },
+    )
 }

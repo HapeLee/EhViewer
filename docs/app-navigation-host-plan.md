@@ -1,6 +1,7 @@
 # 应用级导航宿主方案（P7）
 
-> 状态：P7-a、P7-b 前置（宿主接口隔离）与 P7-b 主体（宿主换 NavDisplay）已落地（见第 10 节）；P7-c ~ P7-e 仍是设计稿。
+> 状态：P7-a、P7-b 前置（宿主接口隔离）、P7-b 主体（宿主换 NavDisplay）与 P7-c 第一子片
+> （登录 / 守卫组出壳）已落地（见第 10 节）；P7-c 剩余页面与 P7-d / P7-e 仍是设计稿。
 > 前置：15 个 Scene 已全部迁到 `EhComposeScene`，XML Scene 清零（见 `compose-kotlin-refactor-plan.md` 第 2 节）。
 > 目标：把「Activity 场景栈 + 每页内部 Nav3 栈」收敛成「单 Activity + 单一 Nav3 栈」，然后删除 `com.hippo.scene`。
 
@@ -250,3 +251,58 @@ fragment 由 `FragmentFactory` 反射创建，入参由 `route.toLegacyArgs(cach
 
 验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
 `:app:assembleDebug` 全绿，无新增编译告警。
+
+### 10.8 P7-c 第一子片：登录 / 守卫组出壳（第五个落地片）
+
+守卫链这五页不再继承 `EhComposeScene`，改成直接的 `@Composable`，注册到宿主的
+`entryProvider` 里——`CompatSceneEntry` 那一层（以及它内部那第二个 `NavDisplay`）对它们不再存在。
+
+出壳的页面：`SecurityScene` / `SignInScene` / `CookieSignInScene` / `WebViewSignInScene` /
+`SelectSiteScene`。文件名不变，但内容从 `class Xxx : EhComposeScene()` 变成
+`@Composable fun XxxScene(...)`。
+
+**新的宿主侧入口**（`ui/host/EhHostState.kt`）：页面失去 Fragment 之后就没法再
+`activity as? EhHost`，所以补了两个 CompositionLocal：
+
+- `LocalEhHost`（`EhHostState`：`showTip`×2 / `setNavCheckedItem` / `setDrawerLockMode` /
+  `toggleDrawer` / `updateProfile` / `hideSoftInput`）。默认 `null`——脱离宿主运行时
+  （预览 / 单测）提示类调用安静失效。实现由 `EhNavHostActivity.hostState` 提供，
+  内部转发给子类的 `EhHost`（目前只有 `MainActivity`）。
+- `LocalEhNavigator`（`EhNavigator`，由 `EhNavController` 实现）。带一个
+  `OnHostResume { }` 辅助——出壳页面没有 `onResume()`，但手势锁要「回到前台自动拉指纹」、
+  登录页要「回到前台收子页结果」，所以用 `LifecycleEventObserver` + 「已经是 RESUMED 就补一次」
+  的组合还原这个语义。
+
+**launch mode 反射链路彻底拆掉**：`EhNavigator` 过去靠 `Announcer(sceneClassOf(route))`
+反射建 Scene，出壳页面没有类可反射。现在 `Fragment.ehNavigator()` / `Activity.ehNavigator()`
+都改走 `EhNavigatorProvider`（`EhNavHostActivity` 实现），`push` / `pop` / `replaceTop`
+直接落在 `EhNavController` 上。`EhNavigator.push` 不再需要类名——
+所以 `sceneClassNameOf` 被拆成 `compatSceneClassNameOf(route): String?`，
+出壳页面返回 `null`，还在兼容承载里的返回类名。
+
+**`SolidScene` 判断也换成 route 判断**：`MainActivity.isSolid` 原来用
+`SolidScene::class.java.isAssignableFrom(topSceneClass)`，但所有页面都继承
+`EhComposeScene : SolidScene`，这个判断**恒为 true**——等于剪贴板提示一直是死的。
+改成 `isSolidRoute(route)`（只有 `Security` / `SignIn` / `SelectSite` 为 true），
+剪贴板提示恢复成设计意图。同理抽屉锁从 `needShowLeftDrawer()` 改成
+`EhRoute.hasLeftDrawer`，由宿主在 `EhSceneShell` 里按 route 应用。
+
+**顺手修的两个真 bug**：
+
+1. 兼容承载的 Fragment tag 原来用 Scene 类名。同一个类可能在栈里有多份
+   （不同查询条件的 `GalleryList`），tag 撞车会让 FragmentManager 把旧 fragment 往新容器里
+   塞，抛 `Can't change container ID of fragment`。改成 `compatSceneKeyOf(route)` =
+   `类名#route.toString()`——数据类的 `toString()` 稳定，旋转重建还能算出同一个 tag
+   和同一个容器 id。
+2. `navigator.pop()` 弹到栈底时现在调用 `EhNavController.onFinishStage` 收掉整个宿主，
+   对应旧 `StageActivity.finishScene` 在只剩一页时 `finish()` 的行为
+   （手势锁重试次数耗尽就是这条路径）。
+
+**已知取舍**（P7-c 后续页面的回归清单要覆盖）：
+
+- 登录类页面的协程从 `lifecycleScope` 换成 `rememberCoroutineScope`，旋转会取消请求。
+  旧实现虽然请求不取消，但 Fragment 重建后 `loading` 本来就丢了，用户可见结果一致。
+- `SignInScene` 的用户名 / 密码 / `SecurityScene` 的重试次数改用 `rememberSaveable`，
+  旋转不再丢（旧实现只有重试次数存了 `onSaveInstanceState`）。
+
+验证：四道门禁全绿，无新增编译告警；`nav` 包单测仍 14 个。

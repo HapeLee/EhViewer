@@ -129,6 +129,49 @@ sealed interface EhRoute : NavKey {
 }
 
 /**
+ * 当前页面是不是守卫链上的一跳（手势锁 / 登录 / 选站点）。
+ *
+ * 取代旧的 `SolidScene::class.java.isAssignableFrom(...)` 判断：所有页面都继承
+ * `EhComposeScene`，而它又继承 `SolidScene`，所以那个判断恒为 true。
+ * 按 route 判定是等价且不会骗人的写法。守卫期间宿主跳过剪贴板提示等行为。
+ */
+fun isSolidRoute(route: EhRoute?): Boolean = when (route) {
+    is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite -> true
+    is EhRoute.GalleryList, is EhRoute.GalleryDetail, is EhRoute.GalleryInfo,
+    is EhRoute.GalleryPreviews, is EhRoute.GalleryComments, is EhRoute.Progress, is EhRoute.Reader,
+    is EhRoute.Favorites, is EhRoute.History, is EhRoute.Downloads, EhRoute.CookieSignIn,
+    EhRoute.WebViewSignIn,
+    -> false
+    null -> true
+}
+
+/**
+ * 该页面是否解锁左侧抽屉（原 `BaseScene.needShowLeftDrawer()`）。
+ *
+ * 守卫链上的页面和「进度中转页」都不允许拉抽屉：前者是入口闸门，
+ * 后者马上会被详情页替换掉。
+ */
+val EhRoute.hasLeftDrawer: Boolean
+    get() = when (this) {
+        is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
+        EhRoute.CookieSignIn, EhRoute.WebViewSignIn,
+        is EhRoute.Progress,
+        -> false
+        is EhRoute.GalleryList, is EhRoute.GalleryDetail, is EhRoute.GalleryInfo,
+        is EhRoute.GalleryPreviews, is EhRoute.GalleryComments, is EhRoute.Reader,
+        is EhRoute.Favorites, is EhRoute.History, is EhRoute.Downloads,
+        -> true
+    }
+
+/**
+ * 该页面对应的抽屉勾选项（原 `BaseScene.getNavCheckedItem()`）。
+ *
+ * 列表 / 收藏 / 历史 / 下载页会按自己的状态再覆盖一次，这里只给默认值。
+ */
+val EhRoute.navCheckedItem: Int
+    get() = 0
+
+/**
  * 画廊列表的查询条件。
  *
  * 对应旧实现里的 `ListUrlBuilder`（Parcelable，进程重建不安全）。`action` 为空表示

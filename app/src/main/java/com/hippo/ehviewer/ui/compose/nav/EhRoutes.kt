@@ -22,7 +22,6 @@ import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.data.ListUrlBuilder
-import com.hippo.ehviewer.ui.scene.CookieSignInScene
 import com.hippo.ehviewer.ui.scene.DownloadsScene
 import com.hippo.ehviewer.ui.scene.FavoritesScene
 import com.hippo.ehviewer.ui.scene.GalleryCommentsScene
@@ -33,10 +32,6 @@ import com.hippo.ehviewer.ui.scene.GalleryPreviewsScene
 import com.hippo.ehviewer.ui.scene.HistoryScene
 import com.hippo.ehviewer.ui.scene.ProgressScene
 import com.hippo.ehviewer.ui.scene.ReaderScene
-import com.hippo.ehviewer.ui.scene.SecurityScene
-import com.hippo.ehviewer.ui.scene.SelectSiteScene
-import com.hippo.ehviewer.ui.scene.SignInScene
-import com.hippo.ehviewer.ui.scene.WebViewSignInScene
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.util.getParcelableCompat
@@ -65,10 +60,6 @@ private val LIST_URL_BUILDER_ACTION get() = GalleryListScene.ACTION_LIST_URL_BUI
 const val CHECK_STEP_SECURITY = 0
 const val CHECK_STEP_SIGN_IN = 1
 const val CHECK_STEP_SELECT_SITE = 2
-
-/** 旧协议里「链走完要去哪」的两个 key */
-private const val KEY_TARGET_SCENE = "target_scene"
-private const val KEY_TARGET_ARGS = "target_args"
 
 /** 守卫链里「目标页」的落点二选一：有 target 就去 target，没有就回到首页 */
 fun homepageRoute(action: String = Settings.launchPageGalleryListSceneAction): EhRoute = EhRoute.GalleryList(GalleryQuery(action = action))
@@ -138,19 +129,6 @@ fun targetOf(route: EhRoute?): EhRoute? = when (route) {
     null -> null
 }
 
-/** 旧 `arguments` 里的 `target_scene` / `target_args` → route */
-private fun targetOf(args: Bundle?): EhRoute? {
-    val className = args?.getString(KEY_TARGET_SCENE) ?: return null
-    return legacyRouteOf(className, args.getBundle(KEY_TARGET_ARGS))
-}
-
-/** route 的目标页写回旧协议 */
-private fun Bundle.putTarget(target: EhRoute?) {
-    target ?: return
-    putString(KEY_TARGET_SCENE, sceneClassNameOf(target))
-    putBundle(KEY_TARGET_ARGS, target.toLegacyArgs(cachedGalleryDetail(target)))
-}
-
 /** 需要整块 GalleryDetail 的页面在这里补缓存上下文 */
 fun cachedGalleryDetail(route: EhRoute): GalleryDetail? = gidOf(route)?.let { runCatching { galleryDetailCache.get(it) }.getOrNull() }
 
@@ -209,14 +187,18 @@ fun gidOf(route: EhRoute): Long? = when (route) {
     -> null
 }
 
-/** route → 承载它的 Scene 类名（旧栈的唯一标识） */
-fun sceneClassNameOf(route: EhRoute): String = when (route) {
-    is EhRoute.SelectSite -> SelectSiteScene::class.java.name
-    is EhRoute.SignIn -> SignInScene::class.java.name
-    is EhRoute.Security -> SecurityScene::class.java.name
+/**
+ * route → 还需要 `CompatSceneEntry` 承载的旧 Scene 类名；已经出壳的页面返回 `null`。
+ *
+ * P7-c 一页一页删，等这里返回的全是 `null` 时，`CompatSceneEntry` 和
+ * `com.hippo.scene` 就能一起删掉（P7-e）。
+ */
+fun compatSceneClassNameOf(route: EhRoute): String? = when (route) {
+    // 守卫链三页 + 两种登录子页已经出壳，不再需要 Fragment
+    is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
+    EhRoute.CookieSignIn, EhRoute.WebViewSignIn,
+    -> null
     is EhRoute.Downloads -> DownloadsScene::class.java.name
-    EhRoute.CookieSignIn -> CookieSignInScene::class.java.name
-    EhRoute.WebViewSignIn -> WebViewSignInScene::class.java.name
     EhRoute.Favorites -> FavoritesScene::class.java.name
     EhRoute.History -> HistoryScene::class.java.name
     is EhRoute.GalleryList -> GalleryListScene::class.java.name
@@ -228,7 +210,17 @@ fun sceneClassNameOf(route: EhRoute): String = when (route) {
     is EhRoute.Reader -> ReaderScene::class.java.name
 }
 
-fun sceneClassOf(route: EhRoute): Class<out SceneFragment> = Class.forName(sceneClassNameOf(route)).asSubclass(SceneFragment::class.java)
+fun compatSceneClassOf(route: EhRoute): Class<out SceneFragment>? = compatSceneClassNameOf(route)?.let { Class.forName(it).asSubclass(SceneFragment::class.java) }
+
+/**
+ * 兼容承载时 Fragment 的 tag（同时兼作容器 id 的种子）。
+ *
+ * 不能用类名：同一个 Scene 类可能同时在栈里有多份（比如不同查询条件的列表页），
+ * 类名撞车会让 FragmentManager 把旧 fragment 往新容器里塞，直接抛
+ * `Can't change container ID of fragment`。route 的 `toString()` 对数据类是稳定的，
+ * 旋转重建后能算出同一个 tag、同一个容器 id。
+ */
+fun compatSceneKeyOf(route: EhRoute): String? = compatSceneClassNameOf(route)?.let { "$it#$route" }
 
 /**
  * route → 旧 `arguments`。
@@ -237,11 +229,10 @@ fun sceneClassOf(route: EhRoute): Class<out SceneFragment> = Class.forName(scene
  * 「先出骨架再刷新」的等待，拿不到就退化成按 id 请求。
  */
 fun EhRoute.toLegacyArgs(detail: GalleryDetail? = null): Bundle = when (this) {
-    EhRoute.CookieSignIn, EhRoute.WebViewSignIn, EhRoute.Favorites, EhRoute.History -> Bundle()
-    // 守卫页把「链走完要去哪」塞回旧协议的 target key
-    is EhRoute.Security -> Bundle().apply { putTarget(target) }
-    is EhRoute.SignIn -> Bundle().apply { putTarget(target) }
-    is EhRoute.SelectSite -> Bundle().apply { putTarget(target) }
+    // 已经出壳的页面不再需要旧 args
+    EhRoute.CookieSignIn, EhRoute.WebViewSignIn, EhRoute.Favorites, EhRoute.History,
+    is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
+    -> Bundle()
     is EhRoute.Downloads -> Bundle().apply {
         if (gid != -1L) {
             putLong(DownloadsScene.KEY_GID, gid)
@@ -298,11 +289,6 @@ fun EhRoute.toLegacyArgs(detail: GalleryDetail? = null): Bundle = when (this) {
  * 认不出来返回 null（未知类、参数缺失），调用方自行兜底。
  */
 fun legacyRouteOf(sceneClassName: String, args: Bundle?): EhRoute? = when (sceneClassName) {
-    SelectSiteScene::class.java.name -> EhRoute.SelectSite(targetOf(args))
-    SignInScene::class.java.name -> EhRoute.SignIn(targetOf(args))
-    CookieSignInScene::class.java.name -> EhRoute.CookieSignIn
-    WebViewSignInScene::class.java.name -> EhRoute.WebViewSignIn
-    SecurityScene::class.java.name -> EhRoute.Security(targetOf(args))
     FavoritesScene::class.java.name -> EhRoute.Favorites
     HistoryScene::class.java.name -> EhRoute.History
     DownloadsScene::class.java.name -> EhRoute.Downloads(

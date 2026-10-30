@@ -18,10 +18,11 @@ package com.hippo.ehviewer.ui.scene
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.lifecycleScope
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
+import androidx.compose.ui.platform.LocalContext
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.UrlOpener
@@ -30,7 +31,6 @@ import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.ui.WebViewActivity
-import com.hippo.ehviewer.ui.compose.EhComposeScene
 import com.hippo.ehviewer.ui.compose.nav.CHECK_STEP_SIGN_IN
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.NavResultBus
@@ -40,6 +40,8 @@ import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.nextCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.targetOf
 import com.hippo.ehviewer.ui.compose.screen.SignInScreen
+import com.hippo.ehviewer.ui.host.OnHostResume
+import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 import com.hippo.util.ExceptionUtils
 import com.hippo.util.launchIO
 import com.hippo.util.withUIContext
@@ -48,140 +50,35 @@ import kotlinx.coroutines.launch
 /**
  * 登录页。
  *
- * 迁移点：
- * - 表单与进度遮罩交给 [SignInScreen]，`TextInputLayout` 的错误状态改成 Compose 状态
- * - 登录/取资料/收尾三步流程与旧实现一致（含 `star` cookie、uconfig、sad panda 检测），
- *   仍在 Scene 的 `lifecycleScope` 上跑，旋转不会丢请求
- * - 子页（WebView / Cookie）登录完成后只发一条 `NavSignal.SignedIn`，
- *   这里在 `onResume` 取一次决定补 `getProfile()` 还是 `finishSignIn()`
+ * P7-c 出壳：不再是 Fragment，页面的输入与进度就是组合里的状态；
+ * 登录 / 取资料 / 收尾三步流程与旧实现一致（含 `star` cookie、uconfig、sad panda 检测）。
+ * 协程挂 `rememberCoroutineScope`，旋转会取消请求——旧实现挂 `lifecycleScope`，
+ * 但 Fragment 重建后 `loading` 状态本来就丢了，所以两者对用户可见的结果一样。
+ *
+ * 子页（WebView / Cookie）登录完成后只发一条 `NavSignal.SignedIn`，
+ * 这里在回到前台时取一次，决定补 `getProfile()` 还是 `finishSignIn()`。
  */
-class SignInScene : EhComposeScene() {
+@Composable
+fun SignInScene(route: EhRoute.SignIn) {
+    val context = LocalContext.current
+    val navigator = ehNavigator()
+    val host = ehHostOrNoOp()
+    val scope = rememberCoroutineScope()
 
-    private var username by mutableStateOf("")
-    private var password by mutableStateOf("")
-    private var usernameError by mutableStateOf<String?>(null)
-    private var passwordError by mutableStateOf<String?>(null)
-    private var loading by mutableStateOf(false)
-    private var errorMessage by mutableStateOf<String?>(null)
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var usernameError by remember { mutableStateOf<String?>(null) }
+    var passwordError by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    override fun needShowLeftDrawer(): Boolean = false
-
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.SignIn> {
-            SignInScreen(
-                username = username,
-                password = password,
-                usernameError = usernameError,
-                passwordError = passwordError,
-                loading = loading,
-                errorMessage = errorMessage,
-                onUsernameChange = {
-                    username = it
-                    usernameError = null
-                },
-                onPasswordChange = {
-                    password = it
-                    passwordError = null
-                },
-                onSignIn = ::signIn,
-                onRegister = {
-                    context?.let { UrlOpener.openUrl(it, EhUrl.URL_REGISTER, false) }
-                },
-                onSignInViaWebView = {
-                    ehNavigator().push(EhRoute.WebViewSignIn)
-                },
-                onSignInViaCookies = {
-                    ehNavigator().push(EhRoute.CookieSignIn)
-                },
-                onSkipSignIn = ::skipSignIn,
-                onDismissError = { errorMessage = null },
-                onOpenForums = {
-                    context?.startActivity(WebViewActivity.newIntent(requireContext(), EhUrl.URL_FORUMS))
-                },
-            )
-        }
-    }
-
-    /**
-     * 收子页的登录结果。
-     *
-     * 子页（WebView / Cookie）把 cookie 落 `EhCookieStore`、资料落 `Settings` 之后
-     * 只发一条 [NavSignal.SignedIn]；这里回到前台时取一次，决定补哪一步收尾。
-     */
-    override fun onResume() {
-        super.onResume()
-        when (val signal = NavResultBus.consume()) {
-            is NavSignal.SignedIn -> when (signal.source) {
-                SignInSource.WEB_VIEW -> getProfile()
-                SignInSource.COOKIE, SignInSource.PASSWORD -> finishSignIn()
-            }
-            null -> Unit
-        }
-    }
-
-    private fun showResultErrorDialog(e: Throwable) {
+    fun showResultError(e: Throwable) {
         loading = false
         errorMessage = ExceptionUtils.getReadableString(e)
     }
 
-    private fun signIn() {
-        if (loading) return
-        val name = username
-        val pwd = password
-        if (name.isEmpty()) {
-            usernameError = getString(R.string.error_username_cannot_empty)
-            return
-        }
-        usernameError = null
-        if (pwd.isEmpty()) {
-            passwordError = getString(R.string.error_password_cannot_empty)
-            return
-        }
-        passwordError = null
-        hideSoftInput()
-        loading = true
-        lifecycleScope.launchIO {
-            EhUtils.signOut()
-            runCatching {
-                EhEngine.signIn(name, pwd)
-            }.onFailure {
-                withUIContext { showResultErrorDialog(it) }
-            }.onSuccess {
-                getProfile()
-            }
-        }
-    }
-
-    private fun getProfile() {
-        lifecycleScope.launchIO {
-            withUIContext { loading = true }
-            runCatching {
-                EhEngine.getProfile().run {
-                    Settings.putDisplayName(displayName)
-                    Settings.putAvatar(avatar)
-                }
-            }.onFailure {
-                withUIContext { showResultErrorDialog(it) }
-            }.onSuccess {
-                finishSignIn()
-            }
-        }
-    }
-
-    private fun skipSignIn() {
-        loading = true
-        lifecycleScope.launchIO {
-            EhUtils.signOut()
-            // 跳过登录时把画廊站点固定成 E 站
-            Settings.putGallerySite(EhUrl.SITE_E)
-            Settings.putSelectSite(false)
-            withUIContext { finishSignIn(false) }
-        }
-    }
-
-    private fun finishSignIn(signedIn: Boolean = true) {
-        lifecycleScope.launchIO {
+    fun finishSignIn(signedIn: Boolean = true) {
+        scope.launchIO {
             withUIContext { loading = true }
             if (signedIn) {
                 runCatching {
@@ -201,10 +98,99 @@ class SignInScene : EhComposeScene() {
             }
             withUIContext {
                 Settings.putNeedSignIn(false)
-                updateAvatar()
+                host.updateProfile()
                 // 登录是守卫链的一跳：用新的落点替换掉登录页本身
-                ehNavigator().replaceTop(nextCheckRoute(CHECK_STEP_SIGN_IN, targetOf(ehRoute)))
+                navigator.replaceTop(nextCheckRoute(CHECK_STEP_SIGN_IN, targetOf(route)))
             }
         }
     }
+
+    fun getProfile() {
+        scope.launchIO {
+            withUIContext { loading = true }
+            runCatching {
+                EhEngine.getProfile().run {
+                    Settings.putDisplayName(displayName)
+                    Settings.putAvatar(avatar)
+                }
+            }.onFailure {
+                withUIContext { showResultError(it) }
+            }.onSuccess {
+                finishSignIn()
+            }
+        }
+    }
+
+    fun signIn() {
+        if (loading) return
+        val name = username
+        val pwd = password
+        if (name.isEmpty()) {
+            usernameError = context.getString(R.string.error_username_cannot_empty)
+            return
+        }
+        usernameError = null
+        if (pwd.isEmpty()) {
+            passwordError = context.getString(R.string.error_password_cannot_empty)
+            return
+        }
+        passwordError = null
+        host.hideSoftInput()
+        loading = true
+        scope.launchIO {
+            EhUtils.signOut()
+            runCatching {
+                EhEngine.signIn(name, pwd)
+            }.onFailure {
+                withUIContext { showResultError(it) }
+            }.onSuccess {
+                getProfile()
+            }
+        }
+    }
+
+    fun skipSignIn() {
+        loading = true
+        scope.launchIO {
+            EhUtils.signOut()
+            // 跳过登录时把画廊站点固定成 E 站
+            Settings.putGallerySite(EhUrl.SITE_E)
+            Settings.putSelectSite(false)
+            withUIContext { finishSignIn(false) }
+        }
+    }
+
+    OnHostResume {
+        when (val signal = NavResultBus.consume()) {
+            is NavSignal.SignedIn -> when (signal.source) {
+                SignInSource.WEB_VIEW -> getProfile()
+                SignInSource.COOKIE, SignInSource.PASSWORD -> finishSignIn()
+            }
+            null -> Unit
+        }
+    }
+
+    SignInScreen(
+        username = username,
+        password = password,
+        usernameError = usernameError,
+        passwordError = passwordError,
+        loading = loading,
+        errorMessage = errorMessage,
+        onUsernameChange = {
+            username = it
+            usernameError = null
+        },
+        onPasswordChange = {
+            password = it
+            passwordError = null
+        },
+        onSignIn = ::signIn,
+        onRegister = { UrlOpener.openUrl(context, EhUrl.URL_REGISTER, false) },
+        onSignInViaWebView = { navigator.push(EhRoute.WebViewSignIn) },
+        onSignInViaCookies = { navigator.push(EhRoute.CookieSignIn) },
+        onSkipSignIn = ::skipSignIn,
+        onDismissError = { errorMessage = null },
+        onOpenForums = { context.startActivity(WebViewActivity.newIntent(context, EhUrl.URL_FORUMS)) },
+    )
 }

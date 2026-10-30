@@ -21,8 +21,10 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -30,6 +32,9 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.GravityCompat
+import androidx.core.view.SoftwareKeyboardControllerCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import androidx.fragment.app.commitNow
@@ -41,15 +46,26 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.ui.EhActivity
+import com.hippo.ehviewer.ui.compose.nav.EhNavigator
+import com.hippo.ehviewer.ui.compose.nav.EhNavigatorProvider
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.LocalEhNavigator
 import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
+import com.hippo.ehviewer.ui.compose.nav.compatSceneClassNameOf
+import com.hippo.ehviewer.ui.compose.nav.compatSceneClassOf
+import com.hippo.ehviewer.ui.compose.nav.compatSceneKeyOf
+import com.hippo.ehviewer.ui.compose.nav.hasLeftDrawer
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
+import com.hippo.ehviewer.ui.compose.nav.navCheckedItem
 import com.hippo.ehviewer.ui.compose.nav.routeOf
-import com.hippo.ehviewer.ui.compose.nav.sceneClassNameOf
-import com.hippo.ehviewer.ui.compose.nav.sceneClassOf
 import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.compose.theme.EhTheme
+import com.hippo.ehviewer.ui.scene.CookieSignInScene
+import com.hippo.ehviewer.ui.scene.SecurityScene
+import com.hippo.ehviewer.ui.scene.SelectSiteScene
+import com.hippo.ehviewer.ui.scene.SignInScene
+import com.hippo.ehviewer.ui.scene.WebViewSignInScene
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.scene.SceneHost
@@ -61,12 +77,53 @@ import com.hippo.scene.SceneHost
  * 返回键要在两层之间判断。这里把两层合成一层：
  * 页面就是返回栈里的 entry，[EhNavController] 是唯一状态源。
  */
-abstract class EhNavHostActivity : EhActivity(), SceneHost {
+abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider {
     private val navEntries = mutableStateListOf<NavKey>()
     private val sceneIndex = HashMap<String, SceneFragment>()
 
-    /** 唯一的返回栈 */
-    val navController: EhNavController = EhNavController(navEntries)
+    /** 唯一的返回栈；弹到栈底还继续弹就是收掉宿主 */
+    val navController: EhNavController = EhNavController(
+        entries = navEntries,
+        onFinishStage = ::finish,
+    )
+
+    override val navigator: EhNavigator
+        get() = navController
+
+    /**
+     * 宿主壳能力在组合里的实现；真正的实现者是实现了 [EhHost] 的子类（目前只有
+     * `MainActivity`）。没实现时页面查不到壳能力，提示类调用安静失效。
+     */
+    internal val hostState: EhHostState = object : EhHostState {
+        private val host: EhHost? get() = this@EhNavHostActivity as? EhHost
+        override fun showTip(message: CharSequence, length: Int) {
+            host?.showTip(message, length)
+        }
+
+        override fun showTip(id: Int, length: Int) {
+            host?.showTip(id, length)
+        }
+
+        override fun setNavCheckedItem(resId: Int) {
+            host?.setNavCheckedItem(resId)
+        }
+
+        override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
+            host?.setDrawerLockMode(lockMode, edgeGravity)
+        }
+
+        override fun toggleDrawer(drawerGravity: Int) {
+            host?.toggleDrawer(drawerGravity)
+        }
+
+        override fun updateProfile() {
+            host?.updateProfile()
+        }
+
+        override fun hideSoftInput() {
+            SoftwareKeyboardControllerCompat(window.decorView).hide()
+        }
+    }
 
     /**
      * 冷启动的第一跳。
@@ -158,12 +215,12 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost {
         get() = navController.size
 
     override val topSceneClass: Class<*>?
-        get() = navController.currentRoute?.let(::sceneClassOf)
+        get() = navController.currentRoute?.let(::compatSceneClassOf)
 
     override val topScene: SceneFragment?
         get() {
             val route = navController.currentRoute ?: return null
-            return sceneIndex[sceneClassNameOf(route)]
+            return compatSceneKeyOf(route)?.let { sceneIndex[it] }
         }
 
     override fun indexOfScene(scene: SceneFragment): Int {
@@ -192,20 +249,20 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost {
 
     override fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {
         val route = routeOf(scene) ?: return
-        sceneIndex[sceneClassNameOf(route)] = scene
+        compatSceneKeyOf(route)?.let { sceneIndex[it] = scene }
     }
 
     override fun onSceneViewDestroyed(scene: SceneFragment) {
         val route = routeOf(scene)
         if (route != null) {
-            sceneIndex.remove(sceneClassNameOf(route))
+            compatSceneKeyOf(route)?.let { sceneIndex.remove(it) }
         }
     }
 
     override fun onSceneDestroyed(scene: SceneFragment) {
         val route = routeOf(scene)
         if (route != null) {
-            sceneIndex.remove(sceneClassNameOf(route))
+            compatSceneKeyOf(route)?.let { sceneIndex.remove(it) }
         }
     }
 
@@ -260,7 +317,7 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost {
  * `rememberNavBackStack` 出来的栈挂上去，攒着的压栈操作这时才回放。
  */
 @Composable
-private fun EhSceneDisplay(controller: EhNavController) {
+private fun EhNavHostActivity.EhSceneDisplay(controller: EhNavController) {
     val backStack = rememberNavBackStack(controller.entries.first())
     LaunchedEffect(backStack) {
         @Suppress("UNCHECKED_CAST")
@@ -268,6 +325,35 @@ private fun EhSceneDisplay(controller: EhNavController) {
     }
     DisposableEffect(backStack) {
         onDispose { controller.detach() }
+    }
+    CompositionLocalProvider(
+        LocalEhHost provides hostState,
+        LocalEhNavigator provides controller,
+    ) {
+        EhSceneShell(controller, backStack)
+    }
+}
+
+/**
+ * 页面外壳：原来由 `BaseScene.onViewCreated` 干的壳配置（左侧抽屉锁 / 导航勾选）
+ * 搬到组合里，按当前 route 的属性应用一次。
+ */
+@Composable
+private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStack: List<NavKey>) {
+    val route = backStack.lastOrNull() as? EhRoute
+    DisposableEffect(route) {
+        if (route != null) {
+            hostState.setDrawerLockMode(
+                if (route.hasLeftDrawer) {
+                    DrawerLayout.LOCK_MODE_UNLOCKED
+                } else {
+                    DrawerLayout.LOCK_MODE_LOCKED_CLOSED
+                },
+                GravityCompat.START,
+            )
+            hostState.setNavCheckedItem(route.navCheckedItem)
+        }
+        onDispose {}
     }
     NavDisplay(
         backStack = backStack,
@@ -278,12 +364,14 @@ private fun EhSceneDisplay(controller: EhNavController) {
             rememberViewModelStoreNavEntryDecorator(),
         ),
         entryProvider = entryProvider {
-            // 迁移期所有页面都还是旧 Scene，统一走兼容承载（P7-c 后逐条替换）
-            entry<EhRoute.SelectSite> { CompatSceneEntry(it) }
-            entry<EhRoute.SignIn> { CompatSceneEntry(it) }
-            entry<EhRoute.CookieSignIn> { CompatSceneEntry(it) }
-            entry<EhRoute.WebViewSignIn> { CompatSceneEntry(it) }
-            entry<EhRoute.Security> { CompatSceneEntry(it) }
+            // 已经出壳的页面：直接是 @Composable，没有 Fragment 这一层
+            entry<EhRoute.SelectSite> { SelectSiteScene(it) }
+            entry<EhRoute.SignIn> { SignInScene(it) }
+            entry<EhRoute.CookieSignIn> { CookieSignInScene() }
+            entry<EhRoute.WebViewSignIn> { WebViewSignInScene() }
+            entry<EhRoute.Security> { SecurityScene(it) }
+
+            // 迁移期其余页面仍是旧 Scene，统一走兼容承载（P7-c 后逐条替换）
             entry<EhRoute.Favorites> { CompatSceneEntry(it) }
             entry<EhRoute.History> { CompatSceneEntry(it) }
             entry<EhRoute.Downloads> { CompatSceneEntry(it) }
@@ -311,7 +399,9 @@ private fun EhSceneDisplay(controller: EhNavController) {
 internal fun CompatSceneEntry(route: EhRoute, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val fragmentManager = remember(context) { (context as FragmentActivity).supportFragmentManager }
-    val key = remember(route) { sceneClassNameOf(route) }
+    val className = compatSceneClassNameOf(route) ?: return
+    // tag / 容器 id 用带参数的 key，反射实例化仍然要类名
+    val key = compatSceneKeyOf(route) ?: return
     val container = remember(fragmentManager, key) {
         FragmentContainerView(context).apply { id = compatContainerIdOf(key) }
     }
@@ -321,7 +411,7 @@ internal fun CompatSceneEntry(route: EhRoute, modifier: Modifier = Modifier) {
             if (fragmentManager.isStateSaved) return@Runnable
             val existing = fragmentManager.findFragmentByTag(key)
             val fragment = existing ?: fragmentManager.fragmentFactory
-                .instantiate(context.classLoader, key)
+                .instantiate(context.classLoader, className)
                 .apply { arguments = route.toLegacyArgs(cachedGalleryDetail(route)) }
             // 旋转重建时 fragment 由 FragmentManager 先恢复出来（还没有 View），
             // 这里重新 add 一次把 View 挂到新容器上

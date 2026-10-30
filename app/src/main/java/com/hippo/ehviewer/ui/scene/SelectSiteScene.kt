@@ -16,10 +16,7 @@
 package com.hippo.ehviewer.ui.scene
 
 import androidx.compose.runtime.Composable
-import androidx.navigation3.runtime.EntryProviderScope
-import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.Settings
-import com.hippo.ehviewer.ui.compose.EhComposeScene
 import com.hippo.ehviewer.ui.compose.nav.CHECK_STEP_SELECT_SITE
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
@@ -28,24 +25,20 @@ import com.hippo.ehviewer.ui.compose.nav.targetOf
 import com.hippo.ehviewer.ui.compose.screen.SelectSiteScreen
 
 /**
- * 首个迁移到 Compose + M3E + Navigation 3 的 Scene。
+ * 选站点页——守卫链的一跳。
  *
- * 守卫链的一跳：选完站点后由 [nextCheckRoute] 算出下一站，不再 `Class.forName` 反解目标。
+ * P7-c 出壳：页面不再是 `EhComposeScene` 的子类，而是直接挂在宿主 `NavDisplay`
+ * 上的一段 @Composable；选完站点由 [nextCheckRoute] 算出下一站，
+ * 再用 [com.hippo.ehviewer.ui.compose.nav.EhNavigator.replaceTop] 把这一跳摘掉。
  */
-class SelectSiteScene : EhComposeScene() {
-
-    override fun needShowLeftDrawer(): Boolean = false
-
-    @Composable
-    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
-        entry<EhRoute.SelectSite> {
-            SelectSiteScreen(
-                onConfirm = { site ->
-                    Settings.putSelectSite(false)
-                    Settings.putGallerySite(site)
-                    ehNavigator().replaceTop(nextCheckRoute(CHECK_STEP_SELECT_SITE, targetOf(ehRoute)))
-                },
-            )
-        }
-    }
+@Composable
+fun SelectSiteScene(route: EhRoute.SelectSite) {
+    val navigator = ehNavigator()
+    SelectSiteScreen(
+        onConfirm = { site ->
+            Settings.putSelectSite(false)
+            Settings.putGallerySite(site)
+            navigator.replaceTop(nextCheckRoute(CHECK_STEP_SELECT_SITE, targetOf(route)))
+        },
+    )
 }

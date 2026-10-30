@@ -61,8 +61,8 @@ import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
 import com.hippo.ehviewer.ui.compose.nav.homepageRoute
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
+import com.hippo.ehviewer.ui.compose.nav.isSolidRoute
 import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
-import com.hippo.ehviewer.ui.compose.nav.sceneClassOf
 import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
@@ -80,7 +80,6 @@ import com.hippo.ehviewer.ui.scene.ProgressScene
 import com.hippo.ehviewer.ui.scene.SecurityScene
 import com.hippo.ehviewer.ui.scene.SelectSiteScene
 import com.hippo.ehviewer.ui.scene.SignInScene
-import com.hippo.ehviewer.ui.scene.SolidScene
 import com.hippo.ehviewer.ui.scene.WebViewSignInScene
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
@@ -158,8 +157,7 @@ class MainActivity :
     }
 
     override fun onUnrecognizedIntent(intent: Intent?) {
-        val clazz = topSceneClass
-        if (clazz != null && SolidScene::class.java.isAssignableFrom(clazz)) {
+        if (isSolidRoute(navController.currentRoute)) {
             // TODO the intent lost
             return
         }
@@ -358,11 +356,9 @@ class MainActivity :
         }, 300)
     }
 
+    /** 守卫链期间不弹剪贴板提示（原来靠 `SolidScene` 子类判断，见 [isSolidRoute]） */
     private val isSolid: Boolean
-        get() {
-            val topClass = topSceneClass
-            return topClass == null || SolidScene::class.java.isAssignableFrom(topClass)
-        }
+        get() = isSolidRoute(navController.currentRoute)
 
     private fun createRouteFromClipboardUrl(url: String): EhRoute? {
         val result1 = GalleryDetailUrlParser.parse(url, false)
