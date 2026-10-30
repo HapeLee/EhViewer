@@ -16,6 +16,7 @@
 package com.hippo.ehviewer
 
 import android.app.Activity
+import android.app.Application
 import android.content.Context
 import android.os.StrictMode
 import android.text.method.LinkMovementMethod
@@ -50,7 +51,6 @@ import com.hippo.ehviewer.ui.EhActivity
 import com.hippo.ehviewer.ui.keepNoMediaFileStatus
 import com.hippo.ehviewer.widget.SearchDatabase
 import com.hippo.okhttp.CloudflareInterceptor
-import com.hippo.scene.SceneApplication
 import com.hippo.util.ReadableTime
 import com.hippo.util.isAtLeastP
 import com.hippo.util.launchIO
@@ -67,7 +67,7 @@ import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 
 class EhApplication :
-    SceneApplication(),
+    Application(),
     SingletonImageLoader.Factory {
     private val mIdGenerator = IntIdGenerator()
     private val mGlobalStuffMap = HashMap<Int, Any>()

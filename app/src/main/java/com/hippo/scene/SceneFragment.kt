@@ -48,12 +48,8 @@ open class SceneFragment : Fragment() {
 
     fun finish(transitionHelper: TransitionHelper? = null) {
         val host = sceneHost ?: return
-        // 转场只有旧 Fragment 栈能表达；新宿主忽略它
-        if (transitionHelper != null && host is StageActivity) {
-            host.finishScene(this, transitionHelper)
-        } else {
-            host.finishScene(this)
-        }
+        // 转场只有旧 Fragment 栈能表达；单一 NavDisplay 宿主忽略它
+        host.finishScene(this)
     }
 
     fun finishStage() {

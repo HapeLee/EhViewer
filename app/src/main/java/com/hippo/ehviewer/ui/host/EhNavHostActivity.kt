@@ -57,8 +57,8 @@ import com.hippo.scene.SceneHost
 /**
  * 应用级导航宿主：一个 Activity、一棵 Compose 树、一个 [NavDisplay] 返回栈。
  *
- * 旧实现（`com.hippo.scene.StageActivity`）是「Activity 里的 Fragment 场景栈」，
- * 页面内部再各自套一个 Nav3 栈，返回键要在两层之间判断。这里把两层合成一层：
+ * 旧实现是「Activity 里的 Fragment 场景栈」，页面内部再各自套一个 Nav3 栈，
+ * 返回键要在两层之间判断。这里把两层合成一层：
  * 页面就是返回栈里的 entry，[EhNavController] 是唯一状态源。
  */
 abstract class EhNavHostActivity : EhActivity(), SceneHost {

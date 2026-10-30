@@ -24,8 +24,8 @@ import android.os.Bundle
  * 而不是依赖 `StageActivity` 这个具体实现。P7-b 把宿主换成单一 `NavDisplay`
  * 之后，[SceneFragment] / `EhNavigator` / `BaseScene` 一行都不用改。
  *
- * 现有实现是 [StageActivity]（Fragment 事务栈）。新宿主只需要实现同一组语义：
- * 压栈、弹栈、取栈顶、给页面发 View 生命周期通知。
+ * 现有实现是 `EhNavHostActivity`（单一 Nav3 `NavDisplay` 返回栈）。
+ * 新宿主只需要实现同一组语义：压栈、弹栈、取栈顶、给页面发 View 生命周期通知。
  */
 interface SceneHost {
     /** 当前栈深度 */
