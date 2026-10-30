@@ -37,6 +37,7 @@ import com.hippo.ehviewer.ui.scene.SecurityScene
 import com.hippo.ehviewer.ui.scene.SelectSiteScene
 import com.hippo.ehviewer.ui.scene.SignInScene
 import com.hippo.ehviewer.ui.scene.WebViewSignInScene
+import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.util.getParcelableCompat
 
@@ -117,6 +118,12 @@ fun nextCheckRoute(step: Int, target: EhRoute?): EhRoute = checkStepRoute(
     needSignedIn = EhUtils.needSignedIn(),
     needSelectSite = Settings.selectSite,
 )
+
+/** `Announcer`（旧协议）→ route；只用于迁移期还没改成 route 的入口 */
+fun routeOf(announcer: Announcer): EhRoute = legacyRouteOf(announcer.clazz.name, announcer.args) ?: homepageRoute()
+
+/** 页面实例 → route；弹栈时用它定位自己 */
+fun routeOf(scene: SceneFragment): EhRoute? = legacyRouteOf(scene.javaClass.name, scene.arguments)
 
 /** 取出守卫 route 携带的目标页 */
 fun targetOf(route: EhRoute?): EhRoute? = when (route) {

@@ -36,8 +36,8 @@ import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import com.hippo.ehviewer.ui.scene.DownloadsScene
-import com.hippo.scene.StageActivity
 import com.hippo.util.ReadableTime
 import com.hippo.util.getParcelableExtraCompat
 import com.hippo.yorozuya.FileUtils
@@ -190,9 +190,9 @@ class DownloadService :
         val bundle = Bundle()
         bundle.putString(DownloadsScene.KEY_ACTION, DownloadsScene.ACTION_CLEAR_DOWNLOAD_SERVICE)
         val activityIntent = Intent(this, MainActivity::class.java)
-        activityIntent.action = StageActivity.ACTION_START_SCENE
-        activityIntent.putExtra(StageActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
-        activityIntent.putExtra(StageActivity.KEY_SCENE_ARGS, bundle)
+        activityIntent.action = EhNavHostActivity.ACTION_START_SCENE
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService,
             0,
@@ -247,9 +247,9 @@ class DownloadService :
         val bundle = Bundle()
         bundle.putLong(DownloadsScene.KEY_GID, info.gid)
         val activityIntent = Intent(this, MainActivity::class.java)
-        activityIntent.action = StageActivity.ACTION_START_SCENE
-        activityIntent.putExtra(StageActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
-        activityIntent.putExtra(StageActivity.KEY_SCENE_ARGS, bundle)
+        activityIntent.action = EhNavHostActivity.ACTION_START_SCENE
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, DownloadsScene::class.java.name)
+        activityIntent.putExtra(EhNavHostActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService,
             0,

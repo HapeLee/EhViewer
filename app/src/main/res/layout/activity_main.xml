@@ -39,8 +39,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
 
-                <com.hippo.ehviewer.widget.EhStageLayout
-                    android:id="@+id/fragment_container"
+                <androidx.compose.ui.platform.ComposeView
+                    android:id="@+id/nav_host"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent" />
             </androidx.coordinatorlayout.widget.CoordinatorLayout>

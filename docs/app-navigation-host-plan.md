@@ -1,6 +1,6 @@
 # 应用级导航宿主方案（P7）
 
-> 状态：P7-a 与 P7-b 前置（宿主接口隔离）已落地（见第 10 节）；P7-b 主体 ~ P7-e 仍是设计稿。
+> 状态：P7-a、P7-b 前置（宿主接口隔离）与 P7-b 主体（宿主换 NavDisplay）已落地（见第 10 节）；P7-c ~ P7-e 仍是设计稿。
 > 前置：15 个 Scene 已全部迁到 `EhComposeScene`，XML Scene 清零（见 `compose-kotlin-refactor-plan.md` 第 2 节）。
 > 目标：把「Activity 场景栈 + 每页内部 Nav3 栈」收敛成「单 Activity + 单一 Nav3 栈」，然后删除 `com.hippo.scene`。
 
@@ -200,3 +200,50 @@ P7-b 主体待做清单（顺序即风险顺序）：
 至此，直接构造 `Announcer` 的地方只剩两处：`MainActivity.announcerFor`（适配旧宿主的临时适配器）与 `EhNavigator.push`（route → 旧协议）。P7-b 把宿主换成 `NavDisplay` 时，这两个函数一起删掉，调用点不用动。
 
 验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、`:app:assembleDebug` 全绿；`nav` 包单测从 6 个增加到 14 个（新增 `CheckStepRouteTest` 8 个用例）。
+
+### 10.7 P7-b 主体：宿主换成 NavDisplay（第四个落地片）
+
+`MainActivity` 不再继承 `StageActivity`，改成继承新的 `EhNavHostActivity`；`activity_main.xml`
+里承载旧 Fragment 栈的 `EhStageLayout`（`@+id/fragment_container`）换成
+`androidx.compose.ui.platform.ComposeView`（`@+id/nav_host`）。
+
+新增两个文件：
+
+- `ui/host/EhNavController.kt`——**返回栈只有一份状态**：一条 `MutableList<NavKey>`。
+  组合还没起来时（`Activity.onCreate` 里解析启动 Intent）压栈先攒在 `pending` 队列，
+  `attach()` 之后按序回放，冷启动跳转不会被吃掉。对外只暴露 `push` / `pop` /
+  `replaceTop` / `popTo` / `popRoute` / `pushAsRoot` / `clearAboveRoot` / `refreshTop`。
+- `ui/host/EhNavHostActivity.kt`——`abstract class EhNavHostActivity : EhActivity(), SceneHost`。
+  `onCreate` 的顺序：先塞根页面 → `setupContent()`（子类 `setContentView` 并绑定抽屉）→
+  给 `R.id.nav_host` 挂上 `EhTheme { EhSceneDisplay(navController) }` → 解析启动 Intent。
+  子类要实现的抽象成员从 `containerViewId` / `launchAnnouncer` / `onCreate2` 换成
+  `initialRoute()` / `setupContent()`；`onStartSceneFromIntent` 的返回类型从 `Announcer?`
+  换成 `EhRoute?`。返回键：`onInterceptBack()` → 栈顶 `SceneFragment.onBackPressed()`
+  （默认实现走 `finish()`）→ 只剩根页面时 `super.onBackPressed()`。
+
+迁移期所有页面仍走 `CompatSceneEntry`：每个 entry 一个 `FragmentContainerView`，
+fragment 由 `FragmentFactory` 反射创建，入参由 `route.toLegacyArgs(cachedGalleryDetail(route))`
+得到，entry 离栈即 `remove`。P7-c 把页面换成纯 `@Composable` 之后整体删掉。
+
+**坑（已修）**：容器 id 不能用 `View.generateViewId()`。旋转重建时 FragmentManager 会先把
+旧 fragment 恢复出来，它记着的 `mContainerId` 必须能在新视图树里找到，否则 fragment 一直拿不到
+容器、页面一片空白。改成由 route 类名哈希推导出稳定 id（`compatContainerIdOf`，高位固定
+`0x01` 避开 `R.id.*`），并且在 `post` 回调里判断 `fragment.view?.parent !== container`
+决定要不要重新 `add`——这样恢复出来的 fragment 也能在新容器上重建 View。
+（Fragment 1.9 的 `createView()` 对「恢复态 + 容器缺失」是跳过建 View 而不是抛异常，
+所以这个时机是安全的。）
+
+顺带清掉的东西：
+
+- `MainActivity` 里 `Announcer` 适配器 `announcerFor` 删除；`startRoute` 的活交给宿主的 `pushRoute`。
+- `ACTION_START_SCENE` / `KEY_SCENE_NAME` / `KEY_SCENE_ARGS` 从 `StageActivity` 迁到
+  `EhNavHostActivity`（`StageActivity` 里留同名别名，`P7-e` 一起删），`UrlOpener` /
+  `DownloadService` 的引用同步改掉。
+- `MainActivity` 的 `init { registerLaunchMode(...) }` 整块删除：launch mode 现在是
+  `EhNavController.push` 的统一语义（已在栈里就弹出其上所有页面），不再按类注册。
+  **行为差异**：原来 `LAUNCH_MODE_STANDARD` 的详情页（`GalleryDetail` / `GalleryInfo` /
+  `GalleryComments` / `GalleryPreviews` / `Progress`）以前可以叠多份，现在同一 route 只会回弹到已
+  有的那一份。这个语义变化要在 P7-c 的回归里确认可接受。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿，无新增编译告警。

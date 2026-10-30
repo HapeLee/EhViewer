@@ -24,6 +24,7 @@ import android.view.View
 import androidx.fragment.app.Fragment
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.ui.EhActivity
+import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import com.hippo.scene.SceneFragment.LaunchMode
 import com.hippo.yorozuya.AssertUtils
 import com.hippo.yorozuya.IntIdGenerator
@@ -567,9 +568,10 @@ abstract class StageActivity : EhActivity(), SceneHost {
     }
 
     companion object {
-        const val ACTION_START_SCENE = "start_scene"
-        const val KEY_SCENE_NAME = "stage_activity_scene_name"
-        const val KEY_SCENE_ARGS = "stage_activity_scene_args"
+        // 常量已迁到新宿主，这里保留别名；P7-e 删掉 StageActivity 时一并去掉
+        const val ACTION_START_SCENE = EhNavHostActivity.ACTION_START_SCENE
+        const val KEY_SCENE_NAME = EhNavHostActivity.KEY_SCENE_NAME
+        const val KEY_SCENE_ARGS = EhNavHostActivity.KEY_SCENE_ARGS
         private val TAG = StageActivity::class.java.getSimpleName()
         private const val KEY_STAGE_ID = "stage_activity_stage_id"
         private const val KEY_SCENE_TAG_LIST = "stage_activity_scene_tag_list"

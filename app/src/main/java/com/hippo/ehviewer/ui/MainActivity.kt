@@ -65,6 +65,7 @@ import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
 import com.hippo.ehviewer.ui.compose.nav.sceneClassOf
 import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.host.EhHost
+import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import com.hippo.ehviewer.ui.scene.BaseScene
 import com.hippo.ehviewer.ui.scene.CookieSignInScene
 import com.hippo.ehviewer.ui.scene.DownloadsScene
@@ -81,10 +82,8 @@ import com.hippo.ehviewer.ui.scene.SelectSiteScene
 import com.hippo.ehviewer.ui.scene.SignInScene
 import com.hippo.ehviewer.ui.scene.SolidScene
 import com.hippo.ehviewer.ui.scene.WebViewSignInScene
-import com.hippo.ehviewer.widget.EhStageLayout
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
-import com.hippo.scene.StageActivity
 import com.hippo.unifile.UniFile
 import com.hippo.unifile.sha1
 import com.hippo.util.addTextToClipboard
@@ -99,7 +98,7 @@ import com.hippo.yorozuya.SimpleHandler
 import com.hippo.yorozuya.ViewUtils
 
 class MainActivity :
-    StageActivity(),
+    EhNavHostActivity(),
     EhHost,
     NavigationView.OnNavigationItemSelectedListener {
     private val settingsLauncher =
@@ -109,34 +108,19 @@ class MainActivity :
     private lateinit var connectivityManager: ConnectivityManager
     private var mSnackBar: CoordinatorLayout? = null
     private var mDrawerLayout: DrawerLayout? = null
-    private var mStageLayout: EhStageLayout? = null
     private var mNavView: NavigationView? = null
     private var mRightDrawer: DrawerView? = null
     private var mAvatar: LoadImageView? = null
     private var mDisplayName: TextView? = null
     private var mNavCheckedItem = 0
 
-    override var containerViewId: Int = R.id.fragment_container
-
-    override var launchAnnouncer: Announcer = announcerFor(initialCheckRoute())
-
     /**
-     * route → 旧 `Announcer`。
+     * 冷启动的第一跳。
      *
-     * 宿主（[StageActivity]）还只认 `Announcer(class, args)`，所以这里做一次适配；
-     * 意图已经全部用 route 表达，P7-b 换成 `NavDisplay` 之后直接删掉这个函数。
+     * 守卫链（手势锁 → 登录 → 选站点）在这里决定开局停在哪个页面；
+     * 没有守卫时就是首页列表。
      */
-    private fun announcerFor(route: EhRoute): Announcer = Announcer(sceneClassOf(route)).setArgs(route.toLegacyArgs(cachedGalleryDetail(route)))
-
-    /**
-     * 冷启动（栈里还是空的）要先过守卫链；已经开着就直接压目标页
-     * ——这是原来 `processAnnouncer` 的语义，只是换成 route 之后不用再串 Bundle 了。
-     */
-    private fun processRoute(route: EhRoute): Announcer = announcerFor(if (sceneCount == 0) initialCheckRoute(route) else route)
-
-    private fun startRoute(route: EhRoute) {
-        startScene(processRoute(route))
-    }
+    override fun initialRoute(): EhRoute = initialCheckRoute()
 
     private fun handleIntent(intent: Intent?): Boolean {
         intent ?: return false
@@ -145,7 +129,7 @@ class MainActivity :
             val uri = intent.data ?: return false
             val route = EhUrlOpener.parseUrl(uri.toString())
             if (route != null) {
-                startRoute(route)
+                pushRoute(route)
                 return true
             }
         } else if (Intent.ACTION_SEND == action) {
@@ -154,7 +138,7 @@ class MainActivity :
                 val builder = ListUrlBuilder().apply {
                     keyword = intent.getStringExtra(Intent.EXTRA_TEXT)
                 }
-                startRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
+                pushRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
                 return true
             } else if (type != null && type.startsWith("image/")) {
                 val uri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
@@ -164,7 +148,7 @@ class MainActivity :
                             mode = ListUrlBuilder.MODE_IMAGE_SEARCH
                             this.hash = hash
                         }
-                        startRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
+                        pushRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
                         return true
                     }
                 }
@@ -200,19 +184,19 @@ class MainActivity :
                 if (handleUrl) {
                     finish()
                 } else {
-                    startRoute(homepageRoute())
+                    pushRoute(homepageRoute())
                 }
             }
         }
     }
 
-    override fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): Announcer = processRoute(legacyRouteOf(clazz.name, args) ?: homepageRoute())
+    /** 下载通知等外部入口：旧参数还原成 route，守卫链由宿主统一跑 */
+    override fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): EhRoute? = legacyRouteOf(clazz.name, args) ?: homepageRoute()
 
-    override fun onCreate2(savedInstanceState: Bundle?) {
+    override fun setupContent(savedInstanceState: Bundle?) {
         connectivityManager = getSystemService()!!
         setContentView(R.layout.activity_main)
         mSnackBar = ViewUtils.`$$`(this, R.id.snackbar) as CoordinatorLayout
-        mStageLayout = ViewUtils.`$$`(this, R.id.fragment_container) as EhStageLayout
         mDrawerLayout = ViewUtils.`$$`(this, R.id.draw_view) as DrawerLayout
         mNavView = ViewUtils.`$$`(this, R.id.nav_view) as NavigationView
         mRightDrawer = ViewUtils.`$$`(this, R.id.right_drawer) as DrawerView
@@ -339,8 +323,10 @@ class MainActivity :
         mNavCheckedItem = savedInstanceState.getInt(KEY_NAV_CHECKED_ITEM)
     }
 
-    override fun onSaveInstanceState(outState: Bundle, outPersistentState: PersistableBundle) {
-        super.onSaveInstanceState(outState, outPersistentState)
+    // 注意：不能用带 PersistableBundle 的重载——它只在 manifest 里声明了
+    // `persistableMode="persistAcrossReboots"` 时才会被调用，否则抽屉选中项永远存不下来
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
         outState.putInt(KEY_NAV_CHECKED_ITEM, mNavCheckedItem)
     }
 
@@ -472,13 +458,10 @@ class MainActivity :
         }
     }
 
-    override fun addAboveSnackView(view: View) {
-        mStageLayout?.addAboveSnackView(view)
-    }
+    // TODO(P7-d) Compose 页面自己管 FAB 等浮层，宿主的 aboveSnack 机制随之删除
+    override fun addAboveSnackView(view: View) = Unit
 
-    override fun removeAboveSnackView(view: View) {
-        mStageLayout?.removeAboveSnackView(view)
-    }
+    override fun removeAboveSnackView(view: View) = Unit
 
     override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
         mDrawerLayout?.setDrawerLockMode(lockMode, edgeGravity)
@@ -557,25 +540,25 @@ class MainActivity :
         val id = item.itemId
         when (id) {
             R.id.nav_homepage -> {
-                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_HOMEPAGE)))
+                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_HOMEPAGE))
             }
             R.id.nav_subscription -> {
-                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_SUBSCRIPTION)))
+                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_SUBSCRIPTION))
             }
             R.id.nav_whats_hot -> {
-                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_WHATS_HOT)))
+                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_WHATS_HOT))
             }
             R.id.nav_toplist -> {
-                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_TOP_LIST)))
+                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_TOP_LIST))
             }
             R.id.nav_favourite -> {
-                startRoute(EhRoute.Favorites)
+                pushRoute(EhRoute.Favorites)
             }
             R.id.nav_history -> {
-                startRoute(EhRoute.History)
+                pushRoute(EhRoute.History)
             }
             R.id.nav_downloads -> {
-                startRoute(EhRoute.Downloads())
+                pushRoute(EhRoute.Downloads())
             }
             R.id.nav_settings -> {
                 val intent = Intent(this, SettingsActivity::class.java)
@@ -590,22 +573,5 @@ class MainActivity :
 
     companion object {
         private const val KEY_NAV_CHECKED_ITEM = "nav_checked_item"
-
-        init {
-            registerLaunchMode(SecurityScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(SignInScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(WebViewSignInScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(CookieSignInScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(SelectSiteScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(GalleryListScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TOP)
-            registerLaunchMode(GalleryDetailScene::class.java, SceneFragment.LAUNCH_MODE_STANDARD)
-            registerLaunchMode(GalleryInfoScene::class.java, SceneFragment.LAUNCH_MODE_STANDARD)
-            registerLaunchMode(GalleryCommentsScene::class.java, SceneFragment.LAUNCH_MODE_STANDARD)
-            registerLaunchMode(GalleryPreviewsScene::class.java, SceneFragment.LAUNCH_MODE_STANDARD)
-            registerLaunchMode(DownloadsScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(FavoritesScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TASK)
-            registerLaunchMode(HistoryScene::class.java, SceneFragment.LAUNCH_MODE_SINGLE_TOP)
-            registerLaunchMode(ProgressScene::class.java, SceneFragment.LAUNCH_MODE_STANDARD)
-        }
     }
 }
