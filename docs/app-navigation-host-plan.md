@@ -236,9 +236,12 @@ fragment 由 `FragmentFactory` 反射创建，入参由 `route.toLegacyArgs(cach
 顺带清掉的东西：
 
 - `MainActivity` 里 `Announcer` 适配器 `announcerFor` 删除；`startRoute` 的活交给宿主的 `pushRoute`。
-- `ACTION_START_SCENE` / `KEY_SCENE_NAME` / `KEY_SCENE_ARGS` 从 `StageActivity` 迁到
-  `EhNavHostActivity`（`StageActivity` 里留同名别名，`P7-e` 一起删），`UrlOpener` /
-  `DownloadService` 的引用同步改掉。
+- `ACTION_START_SCENE` / `KEY_SCENE_NAME` / `KEY_SCENE_ARGS` 迁到 `EhNavHostActivity` 的
+  companion，`UrlOpener` / `DownloadService` 的引用同步改掉。
+- 不再有 Activity 继承 `StageActivity`，于是 `StageActivity.kt` / `StageLayout.kt` /
+  `SceneApplication.kt` / `EhStageLayout.kt` 一并删除（−904 行），`EhApplication` 父类改回
+  `Application()`。`com.hippo.scene` 包保留：`Announcer` / `SceneHost` / `SceneFragment` /
+  `TransitionHelper` 仍是 `EhNavHostActivity` 与 `EhNavigator` 的公共协议。
 - `MainActivity` 的 `init { registerLaunchMode(...) }` 整块删除：launch mode 现在是
   `EhNavController.push` 的统一语义（已在栈里就弹出其上所有页面），不再按类注册。
   **行为差异**：原来 `LAUNCH_MODE_STANDARD` 的详情页（`GalleryDetail` / `GalleryInfo` /
