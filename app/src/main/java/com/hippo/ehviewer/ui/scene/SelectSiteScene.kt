@@ -15,51 +15,37 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
-import com.hippo.ehviewer.R
+import androidx.compose.runtime.Composable
+import androidx.navigation3.runtime.EntryProviderScope
+import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.Settings
-import com.hippo.ehviewer.client.EhUrl
-import com.hippo.yorozuya.ViewUtils
+import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.compose.nav.CHECK_STEP_SELECT_SITE
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.ehNavigator
+import com.hippo.ehviewer.ui.compose.nav.nextCheckRoute
+import com.hippo.ehviewer.ui.compose.nav.targetOf
+import com.hippo.ehviewer.ui.compose.screen.SelectSiteScreen
 
-class SelectSiteScene :
-    SolidScene(),
-    View.OnClickListener {
-    private var mButtonGroup: MaterialButtonToggleGroup? = null
-    private var mOk: View? = null
+/**
+ * 首个迁移到 Compose + M3E + Navigation 3 的 Scene。
+ *
+ * 守卫链的一跳：选完站点后由 [nextCheckRoute] 算出下一站，不再 `Class.forName` 反解目标。
+ */
+class SelectSiteScene : EhComposeScene() {
 
     override fun needShowLeftDrawer(): Boolean = false
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        val view = inflater.inflate(R.layout.scene_select_site, container, false)
-        mButtonGroup = ViewUtils.`$$`(view, R.id.button_group) as MaterialButtonToggleGroup
-        (ViewUtils.`$$`(view, R.id.site_ex) as MaterialButton).isChecked = true
-        mOk = ViewUtils.`$$`(view, R.id.ok)
-        mOk!!.setOnClickListener(this)
-        return view
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        mButtonGroup = null
-        mOk = null
-    }
-
-    override fun onClick(v: View) {
-        val id = mButtonGroup?.checkedButtonId ?: return
-        if (v == mOk) {
-            Settings.putSelectSite(false)
-            Settings.putGallerySite(if (id == R.id.site_ex) EhUrl.SITE_EX else EhUrl.SITE_E)
-            startSceneForCheckStep(CHECK_STEP_SELECT_SITE, arguments)
-            finish()
+    @Composable
+    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
+        entry<EhRoute.SelectSite> {
+            SelectSiteScreen(
+                onConfirm = { site ->
+                    Settings.putSelectSite(false)
+                    Settings.putGallerySite(site)
+                    ehNavigator().replaceTop(nextCheckRoute(CHECK_STEP_SELECT_SITE, targetOf(ehRoute)))
+                },
+            )
         }
     }
 }

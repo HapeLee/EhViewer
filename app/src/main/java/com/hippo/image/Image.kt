@@ -40,13 +40,7 @@ import coil3.size.Scale
 import coil3.size.Size
 import coil3.size.SizeResolver
 import com.hippo.ehviewer.EhApplication
-import com.hippo.ehviewer.jni.isGif
-import com.hippo.ehviewer.jni.mmap
-import com.hippo.ehviewer.jni.munmap
-import com.hippo.ehviewer.jni.nativeTexImage
-import com.hippo.ehviewer.jni.rewriteGifSource
 import com.hippo.unifile.UniFile
-import com.hippo.util.isAtLeastU
 import java.nio.ByteBuffer
 
 class Image private constructor(
@@ -106,14 +100,7 @@ class Image private constructor(
             updateBitmap()
             mBitmap!!
         }
-        nativeTexImage(
-            bitmap,
-            init,
-            offsetX,
-            offsetY,
-            width,
-            height,
-        )
+        uploadTileTexture(bitmap, init, offsetX, offsetY, width, height)
     }
 
     fun start() {
@@ -146,47 +133,24 @@ class Image private constructor(
             }
         }
 
-        suspend fun decode(src: ImageSource): Image? {
-            return runCatching {
-                val image = when (src) {
-                    is UniFileSource -> {
-                        if (!isAtLeastU) {
-                            src.source.openFileDescriptor("rw").use {
-                                val fd = it.fd
-                                if (isGif(fd)) {
-                                    val buffer = mmap(fd)!!
-                                    val source = object : ByteBufferSource {
-                                        override val source = buffer
-                                        override fun close() {
-                                            munmap(buffer)
-                                            src.close()
-                                        }
-                                    }
-                                    return decode(source)
-                                }
-                            }
-                        }
-                        decodeCoil(src.source.uri)
-                    }
-                    is ByteBufferSource -> {
-                        if (!isAtLeastU) {
-                            rewriteGifSource(src.source)
-                        }
-                        decodeCoil(src.source)
-                    }
+        suspend fun decode(src: ImageSource): Image? = runCatching {
+            val image = when (src) {
+                // GIF 的帧延迟修补已经交给 Coil 的 AnimatedImageDecoder（默认开启），
+                // 不再需要在 Android 12/13 上手工 mmap + 改字节
+                is UniFileSource -> decodeCoil(src.source.uri)
+                is ByteBufferSource -> decodeCoil(src.source)
+            }
+            when (image) {
+                is DrawableImage -> image.drawable.apply {
+                    setBounds(0, 0, intrinsicWidth, intrinsicHeight)
                 }
-                when (image) {
-                    is DrawableImage -> image.drawable.apply {
-                        setBounds(0, 0, intrinsicWidth, intrinsicHeight)
-                    }
-                    is BitmapImage -> src.close()
-                }
-                Image(image, src)
-            }.onFailure {
-                src.close()
-                Log.e("Image", "Error", it)
-            }.getOrNull()
-        }
+                is BitmapImage -> src.close()
+            }
+            Image(image, src)
+        }.onFailure {
+            src.close()
+            Log.e("Image", "Error", it)
+        }.getOrNull()
 
         @JvmStatic
         fun create(bitmap: Bitmap): Image = Image(bitmap.asImage(), null)

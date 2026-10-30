@@ -132,6 +132,7 @@
     <string name="go_to">Go to</string>
     <string name="go_to_gid">GID, leave blank for last page</string>
     <string name="go_to_hint">Page %1$d, total %2$d pages</string>
+    <string name="go_to_last_page">Last page</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">Quick search</string>
     <string name="quick_search_tip">Tap \"+\" to add Quick Search</string>
@@ -176,6 +177,17 @@
     <string name="search_sfu">Uploader</string>
     <string name="search_sft">Tags</string>
     <string name="search_image">Image Search</string>
+    <string name="search_category">Category</string>
+    <string name="search_min_rating_none">No limit</string>
+    <string name="clear">Clear</string>
+    <string name="list_mode">List mode</string>
+    <string name="grid_mode">Grid mode</string>
+    <string name="add_quick_search">Add quick search</string>
+    <string name="quick_search_name">Name</string>
+    <string name="check_all">Select all</string>
+    <string name="download_start">Start</string>
+    <string name="download_stop">Stop</string>
+    <string name="download_pin_top">Pin to top</string>
     <string name="select_image">Select image</string>
     <string name="select_image_first">Please select image first</string>
     <string name="keyword_search">Keyword search</string>
@@ -706,4 +718,7 @@
         <item quantity="one">year</item>
         <item quantity="other">years</item>
     </plurals>
+
+    <string name="loading">Loading…</string>
+    <string name="retry">Retry</string>
 </resources>

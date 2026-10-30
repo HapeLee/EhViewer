@@ -33,6 +33,7 @@ import androidx.core.view.SoftwareKeyboardControllerCompat
 import androidx.core.view.WindowCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.scene.SceneFragment
 import com.hippo.util.getSparseParcelableArrayCompat
 import com.hippo.util.isAtLeastR
@@ -42,67 +43,44 @@ abstract class BaseScene : SceneFragment() {
     private var drawerViewState: SparseArray<Parcelable?>? = null
     open var needWhiteStatusBar = true
 
+    /** 宿主壳能力；页面不直接依赖 `MainActivity` */
+    protected val host: EhHost?
+        get() = activity as? EhHost
+
     fun updateAvatar() {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.updateProfile()
-        }
+        host?.updateProfile()
     }
 
     fun addAboveSnackView(view: View) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.addAboveSnackView(view)
-        }
+        host?.addAboveSnackView(view)
     }
 
     fun removeAboveSnackView(view: View) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.removeAboveSnackView(view)
-        }
+        host?.removeAboveSnackView(view)
     }
 
     fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.setDrawerLockMode(lockMode, edgeGravity)
-        }
+        host?.setDrawerLockMode(lockMode, edgeGravity)
     }
 
     fun openDrawer(drawerGravity: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.openDrawer(drawerGravity)
-        }
+        host?.openDrawer(drawerGravity)
     }
 
     fun closeDrawer(drawerGravity: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.closeDrawer(drawerGravity)
-        }
+        host?.closeDrawer(drawerGravity)
     }
 
     fun toggleDrawer(drawerGravity: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.toggleDrawer(drawerGravity)
-        }
+        host?.toggleDrawer(drawerGravity)
     }
 
     fun showTip(message: CharSequence?, length: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.showTip(message!!, length)
-        }
+        host?.showTip(message ?: return, length)
     }
 
     fun showTip(@StringRes id: Int, length: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.showTip(id, length)
-        }
+        host?.showTip(id, length)
     }
 
     open fun needShowLeftDrawer(): Boolean = true
@@ -113,15 +91,11 @@ abstract class BaseScene : SceneFragment() {
      * @param resId 0 for clear
      */
     fun setNavCheckedItem(@IdRes resId: Int) {
-        val activity = activity
-        if (activity is MainActivity) {
-            activity.setNavCheckedItem(resId)
-        }
+        host?.setNavCheckedItem(resId)
     }
 
     fun recreateDrawerView() {
-        val activity = mainActivity
-        activity?.createDrawerView(this)
+        host?.recreateDrawerView(this)
     }
 
     fun createDrawerView(

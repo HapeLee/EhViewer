@@ -21,6 +21,7 @@ import android.os.ParcelFileDescriptor.AutoCloseInputStream
 import android.os.ParcelFileDescriptor.AutoCloseOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.security.MessageDigest
 
 /**
  * Use Native IO/NIO directly if possible, unless you need process file content on JVM!
@@ -32,4 +33,29 @@ fun UniFile.openInputStream(): FileInputStream = AutoCloseInputStream(openFileDe
  */
 fun UniFile.openOutputStream(): FileOutputStream = AutoCloseOutputStream(openFileDescriptor("wt"))
 
-fun UniFile.sha1() = openFileDescriptor("r").use { com.hippo.ehviewer.jni.sha1(it.fd) }
+private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+/**
+ * 文件内容的 SHA-1（小写 hex）。
+ *
+ * 原实现走 JNI（`hash.c` + libnettle），这里换成 JDK 的 [MessageDigest]，
+ * 语义保持一致：从文件起始位置读到底，失败返回 null。
+ */
+fun UniFile.sha1(): String? = runCatching {
+    openInputStream().use { input ->
+        val digest = MessageDigest.getInstance("SHA-1")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+        val bytes = digest.digest()
+        buildString(bytes.size * 2) {
+            bytes.forEach {
+                append(HEX_DIGITS[(it.toInt() shr 4) and 0xF])
+                append(HEX_DIGITS[it.toInt() and 0xF])
+            }
+        }
+    }
+}.getOrNull()

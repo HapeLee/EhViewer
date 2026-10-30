@@ -15,17 +15,29 @@
  */
 package com.hippo.ehviewer.ui.scene
 
+import android.content.Context
+import android.graphics.Color
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation3.runtime.EntryProviderScope
+import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.client.EhCookieStore
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
+import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.NavResultBus
+import com.hippo.ehviewer.ui.compose.nav.NavSignal
+import com.hippo.ehviewer.ui.compose.nav.SignInSource
+import com.hippo.ehviewer.ui.compose.screen.SignInWebViewScreen
 import com.hippo.ehviewer.util.addQuicHints
 import com.hippo.ehviewer.util.setDefaultSettings
 import com.hippo.ehviewer.widget.DialogWebChromeClient
@@ -34,42 +46,66 @@ import com.hippo.util.withUIContext
 import okhttp3.Cookie
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import rikka.core.res.resolveColor
 
-class WebViewSignInScene : SolidScene() {
-    private var mWebView: WebView? = null
+/**
+ * Web 登录页：一个 WebView，登录成功后发 `NavSignal.SignedIn(WEB_VIEW)` 再退出。
+ *
+ * 迁到 [EhComposeScene] 后结构没有变化（这页本来也没有 XML 布局，WebView 是代码构造的），
+ * 变化只有两点：WebView 通过 `AndroidView` 挂进 Compose 树、加载进度从「隐藏的 ProgressBar」
+ * 换成顶部的 `LinearProgressIndicator`。
+ */
+class WebViewSignInScene : EhComposeScene() {
+
+    private var progress by mutableIntStateOf(0)
+    private var createdWebView: WebView? = null
 
     override fun needShowLeftDrawer(): Boolean = false
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        // http://stackoverflow.com/questions/32284642/how-to-handle-an-uncatched-exception
-        CookieManager.getInstance().apply {
-            flush()
-            removeAllCookies(null)
-            removeSessionCookies(null)
-        }
-        EhCookieStore.loadForWebView(EhUrl.URL_SIGN_IN) {
-            it.name == EhCookieStore.KEY_CLOUDFLARE
-        }
-        return WebView(requireContext()).apply {
-            setBackgroundColor(theme.resolveColor(android.R.attr.colorBackground))
-            setDefaultSettings()
-            webViewClient = LoginWebViewClient()
-            webChromeClient = DialogWebChromeClient(context)
-            addQuicHints(EhUrl.URL_SIGN_IN)
-            loadUrl(EhUrl.URL_SIGN_IN)
-            mWebView = this
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) {
+            // http://stackoverflow.com/questions/32284642/how-to-handle-an-uncatched-exception
+            CookieManager.getInstance().apply {
+                flush()
+                removeAllCookies(null)
+                removeSessionCookies(null)
+            }
+            EhCookieStore.loadForWebView(EhUrl.URL_SIGN_IN) {
+                it.name == EhCookieStore.KEY_CLOUDFLARE
+            }
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        mWebView?.destroy()
-        mWebView = null
+        createdWebView?.destroy()
+        createdWebView = null
+    }
+
+    @Composable
+    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
+        entry<EhRoute.WebViewSignIn> {
+            SignInWebViewScreen(
+                progress = progress,
+                createWebView = {
+                    createWebView(requireContext()).also { createdWebView = it }
+                },
+            )
+        }
+    }
+
+    private fun createWebView(context: Context): WebView = WebView(context).apply {
+        setBackgroundColor(Color.TRANSPARENT)
+        setDefaultSettings()
+        webViewClient = LoginWebViewClient()
+        webChromeClient = object : DialogWebChromeClient(context) {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                super.onProgressChanged(view, newProgress)
+                this@WebViewSignInScene.progress = newProgress
+            }
+        }
+        addQuicHints(EhUrl.URL_SIGN_IN)
+        loadUrl(EhUrl.URL_SIGN_IN)
     }
 
     private inner class LoginWebViewClient : WebViewClient() {
@@ -78,8 +114,7 @@ class WebViewSignInScene : SolidScene() {
                 return emptyList()
             }
             var cookies: MutableList<Cookie>? = null
-            val pieces =
-                cookieStrings.split(";".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
+            val pieces = cookieStrings.split(";").dropLastWhile { it.isEmpty() }
             for (piece in pieces) {
                 val cookie = Cookie.parse(url!!, piece) ?: continue
                 if (cookies == null) {
@@ -114,20 +149,20 @@ class WebViewSignInScene : SolidScene() {
                 } else if (EhCookieStore.KEY_IPB_PASS_HASH == cookie.name) {
                     getHash = true
                 } else if (EhCookieStore.KEY_CLOUDFLARE == cookie.name) {
-                    viewLifecycleOwner.lifecycleScope.launchIO {
+                    lifecycleScope.launchIO {
                         addCookie(cookie.domain, cookie)
                     }
                 }
             }
             if (getId && getHash) {
-                viewLifecycleOwner.lifecycleScope.launchIO {
+                lifecycleScope.launchIO {
                     EhUtils.signOut()
                     cookies.forEach {
                         addCookie(EhUrl.DOMAIN_EX, it)
                         addCookie(EhUrl.DOMAIN_E, it)
                     }
                     withUIContext {
-                        setResult(RESULT_OK, null)
+                        NavResultBus.publish(NavSignal.SignedIn(SignInSource.WEB_VIEW))
                         finish()
                     }
                 }

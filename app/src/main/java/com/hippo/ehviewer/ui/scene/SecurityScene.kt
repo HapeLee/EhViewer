@@ -15,54 +15,59 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorManager
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.runtime.Composable
+import androidx.navigation3.runtime.EntryProviderScope
+import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
+import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.compose.nav.CHECK_STEP_SECURITY
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.ehNavigator
+import com.hippo.ehviewer.ui.compose.nav.nextCheckRoute
+import com.hippo.ehviewer.ui.compose.nav.targetOf
+import com.hippo.ehviewer.ui.compose.screen.SecurityScreen
 import com.hippo.widget.lockpattern.LockPatternUtils
 import com.hippo.widget.lockpattern.LockPatternView
-import com.hippo.widget.lockpattern.LockPatternView.OnPatternListener
 import com.hippo.yorozuya.ObjectUtils
-import com.hippo.yorozuya.ViewUtils
 import java.util.concurrent.Executors
 
-class SecurityScene :
-    SolidScene(),
-    OnPatternListener {
-    private var mPatternView: LockPatternView? = null
-    private var mSensorManager: SensorManager? = null
-    private var mAccelerometer: Sensor? = null
+/**
+ * 手势锁页。
+ *
+ * 迁移点：
+ * - 布局容器换成 Compose，[LockPatternView] 本身原样保留（图案绘制/手势解析不动）
+ * - 指纹提示、重试次数、成功后的 `CHECK_STEP_SECURITY` 流程与原来一致
+ */
+class SecurityScene : EhComposeScene() {
+
+    private var patternView: LockPatternView? = null
+    private var canAuthenticate = false
+    private var retryTimes = MAX_RETRY_TIMES
     private var promptInfo: BiometricPrompt.PromptInfo? = null
     private var biometricPrompt: BiometricPrompt? = null
-    private var canAuthenticate = false
-    private var mRetryTimes = 0
 
     override fun needShowLeftDrawer(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val context = requireContext()
-        mSensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        mAccelerometer = mSensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-        mRetryTimes = savedInstanceState?.getInt(KEY_RETRY_TIMES) ?: MAX_RETRY_TIMES
-
+        retryTimes = savedInstanceState?.getInt(KEY_RETRY_TIMES) ?: MAX_RETRY_TIMES
         canAuthenticate = Settings.enableFingerprint &&
-            BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+            BiometricManager.from(context)
+                .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
+            BiometricManager.BIOMETRIC_SUCCESS
         biometricPrompt = BiometricPrompt(
             this,
             Executors.newSingleThreadExecutor(),
             object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    startSceneForCheckStep(CHECK_STEP_SECURITY, arguments)
-                    finish()
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult,
+                ) {
+                    unlock()
                 }
             },
         )
@@ -73,12 +78,6 @@ class SecurityScene :
             .build()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        mSensorManager = null
-        mAccelerometer = null
-    }
-
     override fun onResume() {
         super.onResume()
         if (canAuthenticate) {
@@ -86,51 +85,49 @@ class SecurityScene :
         }
     }
 
-    private fun startBiometricPrompt() {
-        biometricPrompt!!.authenticate(promptInfo!!)
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putInt(KEY_RETRY_TIMES, mRetryTimes)
-    }
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        val view = inflater.inflate(R.layout.scene_security, container, false)
-        if (canAuthenticate) {
-            view.setOnClickListener { startBiometricPrompt() }
-        }
-        mPatternView = ViewUtils.`$$`(view, R.id.pattern_view) as LockPatternView
-        mPatternView!!.setOnPatternListener(this)
-        return view
+        outState.putInt(KEY_RETRY_TIMES, retryTimes)
     }
 
     override fun onDestroyView() {
+        patternView = null
         super.onDestroyView()
-        mPatternView = null
     }
 
-    override fun onPatternStart() {}
-    override fun onPatternCleared() {}
-    override fun onPatternCellAdded(pattern: List<LockPatternView.Cell>) {}
-
-    override fun onPatternDetected(pattern: List<LockPatternView.Cell>) {
-        val activity = mainActivity
-        if (null == activity || null == mPatternView) {
-            return
+    @Composable
+    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
+        entry<EhRoute.Security> {
+            SecurityScreen(
+                canAuthenticate = canAuthenticate,
+                onPatternDetected = ::onPatternDetected,
+                onViewCreated = { patternView = it },
+                onBiometricClick = ::startBiometricPrompt,
+            )
         }
-        val enteredPatter = LockPatternUtils.patternToString(pattern)
-        val targetPatter = Settings.security
-        if (ObjectUtils.equal(enteredPatter, targetPatter)) {
-            startSceneForCheckStep(CHECK_STEP_SECURITY, arguments)
-            finish()
+    }
+
+    private fun startBiometricPrompt() {
+        biometricPrompt?.authenticate(promptInfo ?: return)
+    }
+
+    private fun onPatternDetected(pattern: List<LockPatternView.Cell>) {
+        val view = patternView ?: return
+        if (mainActivity == null) return
+        val enteredPattern = LockPatternUtils.patternToString(pattern)
+        if (ObjectUtils.equal(enteredPattern, Settings.security)) {
+            unlock()
         } else {
-            mPatternView!!.setDisplayMode(LockPatternView.DisplayMode.Wrong)
-            mRetryTimes--
-            if (mRetryTimes <= 0) {
+            view.setDisplayMode(LockPatternView.DisplayMode.Wrong)
+            retryTimes--
+            if (retryTimes <= 0) {
                 finish()
             }
         }
+    }
+
+    private fun unlock() {
+        ehNavigator().replaceTop(nextCheckRoute(CHECK_STEP_SECURITY, targetOf(ehRoute)))
     }
 
     companion object {

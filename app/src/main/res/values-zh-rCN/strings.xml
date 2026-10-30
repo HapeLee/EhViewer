@@ -125,6 +125,7 @@
     <string name="go_to">跳页</string>
     <string name="go_to_gid">GID，留空跳转末页</string>
     <string name="go_to_hint">第 %1$d 页，共 %2$d 页</string>
+    <string name="go_to_last_page">末页</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">快速搜索</string>
     <string name="quick_search_tip">点击“+”来添加快速搜索</string>
@@ -167,6 +168,17 @@
     <string name="search_sfu">上传者</string>
     <string name="search_sft">标签</string>
     <string name="search_image">图片搜索</string>
+    <string name="search_category">分类</string>
+    <string name="search_min_rating_none">不限</string>
+    <string name="clear">清除</string>
+    <string name="list_mode">列表模式</string>
+    <string name="grid_mode">网格模式</string>
+    <string name="add_quick_search">添加快速搜索</string>
+    <string name="quick_search_name">名称</string>
+    <string name="check_all">全选</string>
+    <string name="download_start">开始</string>
+    <string name="download_stop">停止</string>
+    <string name="download_pin_top">置顶</string>
     <string name="select_image">选择图片</string>
     <string name="select_image_first">请先选择图片</string>
     <string name="keyword_search">关键字搜索</string>

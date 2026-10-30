@@ -15,64 +15,11 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.os.Bundle
-import android.util.Log
-import com.hippo.ehviewer.Settings
-import com.hippo.ehviewer.client.EhUtils
-import com.hippo.scene.Announcer
-
 /**
- * Scene for safety, can't be covered
+ * 守卫链（手势锁 → 登录 → 选站点）上的页面标记。
+ *
+ * 原来这里还挂着 `startSceneForCheckStep` 和 `target_scene` 反射，现在整条链交给
+ * `com.hippo.ehviewer.ui.compose.nav.checkStepRoute` 表达，只剩这个标记：
+ * 宿主用它判断「栈顶是不是守卫页」（守卫页期间跳过剪贴板提示等宿主行为）。
  */
-open class SolidScene : BaseScene() {
-    fun startSceneForCheckStep(checkStep: Int, args: Bundle?) {
-        when (checkStep) {
-            CHECK_STEP_SECURITY -> {
-                if (EhUtils.needSignedIn()) {
-                    startScene(Announcer(SignInScene::class.java).setArgs(args), true)
-                } else {
-                    startSceneForCheckStep(CHECK_STEP_SIGN_IN, args)
-                }
-            }
-            CHECK_STEP_SIGN_IN -> {
-                if (Settings.selectSite) {
-                    startScene(Announcer(SelectSiteScene::class.java).setArgs(args), true)
-                } else {
-                    startSceneForCheckStep(CHECK_STEP_SELECT_SITE, args)
-                }
-            }
-            CHECK_STEP_SELECT_SITE -> {
-                var targetScene: String? = null
-                var targetArgs: Bundle? = null
-                if (null != args) {
-                    targetScene = args.getString(KEY_TARGET_SCENE)
-                    targetArgs = args.getBundle(KEY_TARGET_ARGS)
-                }
-                var clazz: Class<*>? = null
-                if (targetScene != null) {
-                    try {
-                        clazz = Class.forName(targetScene)
-                    } catch (_: ClassNotFoundException) {
-                        Log.e(TAG, "Can't find class with name: $targetScene")
-                    }
-                }
-                if (clazz != null) {
-                    startScene(Announcer(clazz).setArgs(targetArgs))
-                } else {
-                    val newArgs = Bundle()
-                    newArgs.putString(GalleryListScene.KEY_ACTION, Settings.launchPageGalleryListSceneAction)
-                    startScene(Announcer(GalleryListScene::class.java).setArgs(newArgs))
-                }
-            }
-        }
-    }
-
-    companion object {
-        const val CHECK_STEP_SECURITY = 0
-        const val CHECK_STEP_SIGN_IN = 1
-        const val CHECK_STEP_SELECT_SITE = 2
-        const val KEY_TARGET_SCENE = "target_scene"
-        const val KEY_TARGET_ARGS = "target_args"
-        private val TAG = SolidScene::class.java.simpleName
-    }
-}
+open class SolidScene : BaseScene()

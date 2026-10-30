@@ -28,6 +28,9 @@ import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
 import com.hippo.ehviewer.ui.GalleryActivity
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
+import com.hippo.ehviewer.ui.compose.nav.sceneClassNameOf
+import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.scene.StageActivity
 import rikka.core.res.resolveColor
 
@@ -67,11 +70,11 @@ object UrlOpener {
                     }
                 }
             }
-            parseUrl(url)?.let {
+            parseUrl(url)?.let { route ->
                 intent = Intent(context, MainActivity::class.java)
                 intent.action = StageActivity.ACTION_START_SCENE
-                intent.putExtra(StageActivity.KEY_SCENE_NAME, it.clazz.name)
-                intent.putExtra(StageActivity.KEY_SCENE_ARGS, it.args)
+                intent.putExtra(StageActivity.KEY_SCENE_NAME, sceneClassNameOf(route))
+                intent.putExtra(StageActivity.KEY_SCENE_ARGS, route.toLegacyArgs(cachedGalleryDetail(route)))
                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 context.startActivity(intent)
                 return

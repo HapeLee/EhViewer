@@ -55,6 +55,16 @@ import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.ListUrlBuilder
 import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
+import com.hippo.ehviewer.ui.compose.nav.ehNavigator
+import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
+import com.hippo.ehviewer.ui.compose.nav.homepageRoute
+import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
+import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
+import com.hippo.ehviewer.ui.compose.nav.sceneClassOf
+import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
+import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.ehviewer.ui.scene.BaseScene
 import com.hippo.ehviewer.ui.scene.CookieSignInScene
 import com.hippo.ehviewer.ui.scene.DownloadsScene
@@ -90,6 +100,7 @@ import com.hippo.yorozuya.ViewUtils
 
 class MainActivity :
     StageActivity(),
+    EhHost,
     NavigationView.OnNavigationItemSelectedListener {
     private val settingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -107,66 +118,53 @@ class MainActivity :
 
     override var containerViewId: Int = R.id.fragment_container
 
-    override var launchAnnouncer: Announcer =
-        if (!TextUtils.isEmpty(Settings.security)) {
-            Announcer(SecurityScene::class.java)
-        } else if (EhUtils.needSignedIn()) {
-            Announcer(SignInScene::class.java)
-        } else if (Settings.selectSite) {
-            Announcer(SelectSiteScene::class.java)
-        } else {
-            val args = Bundle()
-            args.putString(
-                GalleryListScene.KEY_ACTION,
-                Settings.launchPageGalleryListSceneAction,
-            )
-            Announcer(GalleryListScene::class.java).setArgs(args)
-        }
+    override var launchAnnouncer: Announcer = announcerFor(initialCheckRoute())
 
-    // Sometimes scene can't show directly
-    private fun processAnnouncer(announcer: Announcer): Announcer {
-        if (0 == sceneCount) {
-            val newArgs = Bundle()
-            newArgs.putString(SolidScene.KEY_TARGET_SCENE, announcer.clazz.name)
-            newArgs.putBundle(SolidScene.KEY_TARGET_ARGS, announcer.args)
-            if (!TextUtils.isEmpty(Settings.security)) {
-                return Announcer(SecurityScene::class.java).setArgs(newArgs)
-            } else if (EhUtils.needSignedIn()) {
-                return Announcer(SignInScene::class.java).setArgs(newArgs)
-            } else if (Settings.selectSite) {
-                return Announcer(SelectSiteScene::class.java).setArgs(newArgs)
-            }
-        }
-        return announcer
+    /**
+     * route → 旧 `Announcer`。
+     *
+     * 宿主（[StageActivity]）还只认 `Announcer(class, args)`，所以这里做一次适配；
+     * 意图已经全部用 route 表达，P7-b 换成 `NavDisplay` 之后直接删掉这个函数。
+     */
+    private fun announcerFor(route: EhRoute): Announcer = Announcer(sceneClassOf(route)).setArgs(route.toLegacyArgs(cachedGalleryDetail(route)))
+
+    /**
+     * 冷启动（栈里还是空的）要先过守卫链；已经开着就直接压目标页
+     * ——这是原来 `processAnnouncer` 的语义，只是换成 route 之后不用再串 Bundle 了。
+     */
+    private fun processRoute(route: EhRoute): Announcer = announcerFor(if (sceneCount == 0) initialCheckRoute(route) else route)
+
+    private fun startRoute(route: EhRoute) {
+        startScene(processRoute(route))
     }
 
     private fun handleIntent(intent: Intent?): Boolean {
-        if (intent == null) {
-            return false
-        }
+        intent ?: return false
         val action = intent.action
         if (Intent.ACTION_VIEW == action) {
             val uri = intent.data ?: return false
-            val announcer = EhUrlOpener.parseUrl(uri.toString())
-            if (announcer != null) {
-                startScene(processAnnouncer(announcer))
+            val route = EhUrlOpener.parseUrl(uri.toString())
+            if (route != null) {
+                startRoute(route)
                 return true
             }
         } else if (Intent.ACTION_SEND == action) {
             val type = intent.type
             if ("text/plain" == type) {
-                val builder = ListUrlBuilder()
-                builder.keyword = intent.getStringExtra(Intent.EXTRA_TEXT)
-                startScene(processAnnouncer(GalleryListScene.getStartAnnouncer(builder)))
+                val builder = ListUrlBuilder().apply {
+                    keyword = intent.getStringExtra(Intent.EXTRA_TEXT)
+                }
+                startRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
                 return true
             } else if (type != null && type.startsWith("image/")) {
                 val uri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
                 if (null != uri) {
-                    UniFile.fromUri(this, uri)?.sha1()?.let {
-                        val builder = ListUrlBuilder()
-                        builder.mode = ListUrlBuilder.MODE_IMAGE_SEARCH
-                        builder.hash = it
-                        startScene(processAnnouncer(GalleryListScene.getStartAnnouncer(builder)))
+                    UniFile.fromUri(this, uri)?.sha1()?.let { hash ->
+                        val builder = ListUrlBuilder().apply {
+                            mode = ListUrlBuilder.MODE_IMAGE_SEARCH
+                            this.hash = hash
+                        }
+                        startRoute(EhRoute.GalleryList(galleryQueryOf(builder)))
                         return true
                     }
                 }
@@ -202,18 +200,13 @@ class MainActivity :
                 if (handleUrl) {
                     finish()
                 } else {
-                    val args = Bundle()
-                    args.putString(
-                        GalleryListScene.KEY_ACTION,
-                        Settings.launchPageGalleryListSceneAction,
-                    )
-                    startScene(processAnnouncer(Announcer(GalleryListScene::class.java).setArgs(args)))
+                    startRoute(homepageRoute())
                 }
             }
         }
     }
 
-    override fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): Announcer = processAnnouncer(Announcer(clazz).setArgs(args))
+    override fun onStartSceneFromIntent(clazz: Class<*>, args: Bundle?): Announcer = processRoute(legacyRouteOf(clazz.name, args) ?: homepageRoute())
 
     override fun onCreate2(savedInstanceState: Bundle?) {
         connectivityManager = getSystemService()!!
@@ -385,23 +378,18 @@ class MainActivity :
             return topClass == null || SolidScene::class.java.isAssignableFrom(topClass)
         }
 
-    private fun createAnnouncerFromClipboardUrl(url: String): Announcer? {
+    private fun createRouteFromClipboardUrl(url: String): EhRoute? {
         val result1 = GalleryDetailUrlParser.parse(url, false)
         if (result1 != null) {
-            val args = Bundle()
-            args.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_GID_TOKEN)
-            args.putLong(GalleryDetailScene.KEY_GID, result1.gid)
-            args.putString(GalleryDetailScene.KEY_TOKEN, result1.token)
-            return Announcer(GalleryDetailScene::class.java).setArgs(args)
+            return EhRoute.GalleryDetail(gid = result1.gid, token = result1.token)
         }
         val result2 = GalleryPageUrlParser.parse(url, false)
         if (result2 != null) {
-            val args = Bundle()
-            args.putString(ProgressScene.KEY_ACTION, ProgressScene.ACTION_GALLERY_TOKEN)
-            args.putLong(ProgressScene.KEY_GID, result2.gid)
-            args.putString(ProgressScene.KEY_PTOKEN, result2.pToken)
-            args.putInt(ProgressScene.KEY_PAGE, result2.page)
-            return Announcer(ProgressScene::class.java).setArgs(args)
+            return EhRoute.Progress(
+                gid = result2.gid,
+                pToken = result2.pToken,
+                page = result2.page,
+            )
         }
         return null
     }
@@ -410,17 +398,15 @@ class MainActivity :
         val text = this.getClipboardManager().getUrlFromClipboard(this)
         val hashCode = text?.hashCode() ?: 0
         if (text != null && hashCode != 0 && Settings.clipboardTextHashCode != hashCode) {
-            val announcer = createAnnouncerFromClipboardUrl(text)
-            if (announcer != null && mSnackBar != null) {
+            val route = createRouteFromClipboardUrl(text)
+            if (route != null && mSnackBar != null) {
                 val snackbar = Snackbar.make(
                     mSnackBar!!,
                     R.string.clipboard_gallery_url_snack_message,
                     Snackbar.LENGTH_SHORT,
                 )
                 snackbar.setAction(R.string.clipboard_gallery_url_snack_action) {
-                    startScene(
-                        announcer,
-                    )
+                    ehNavigator().push(route)
                 }
                 snackbar.show()
             }
@@ -430,6 +416,10 @@ class MainActivity :
 
     override fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {
         super.onSceneViewCreated(scene, savedInstanceState)
+        createDrawerView(scene)
+    }
+
+    override fun recreateDrawerView(scene: BaseScene) {
         createDrawerView(scene)
     }
 
@@ -464,7 +454,7 @@ class MainActivity :
         }
     }
 
-    fun updateProfile() {
+    override fun updateProfile() {
         if (mAvatar == null || mDisplayName == null) {
             return
         }
@@ -482,27 +472,27 @@ class MainActivity :
         }
     }
 
-    fun addAboveSnackView(view: View) {
+    override fun addAboveSnackView(view: View) {
         mStageLayout?.addAboveSnackView(view)
     }
 
-    fun removeAboveSnackView(view: View) {
+    override fun removeAboveSnackView(view: View) {
         mStageLayout?.removeAboveSnackView(view)
     }
 
-    fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
+    override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
         mDrawerLayout?.setDrawerLockMode(lockMode, edgeGravity)
     }
 
-    fun openDrawer(drawerGravity: Int) {
+    override fun openDrawer(drawerGravity: Int) {
         mDrawerLayout?.openDrawer(drawerGravity)
     }
 
-    fun closeDrawer(drawerGravity: Int) {
+    override fun closeDrawer(drawerGravity: Int) {
         mDrawerLayout?.closeDrawer(drawerGravity)
     }
 
-    fun toggleDrawer(drawerGravity: Int) {
+    override fun toggleDrawer(drawerGravity: Int) {
         mDrawerLayout?.run {
             if (isDrawerOpen(drawerGravity)) {
                 closeDrawer(drawerGravity)
@@ -512,7 +502,7 @@ class MainActivity :
         }
     }
 
-    fun setNavCheckedItem(@IdRes resId: Int) {
+    override fun setNavCheckedItem(@IdRes resId: Int) {
         mNavCheckedItem = resId
         mNavView?.run {
             if (resId == 0) {
@@ -523,7 +513,7 @@ class MainActivity :
         }
     }
 
-    fun showTip(@StringRes id: Int, length: Int) {
+    override fun showTip(@StringRes id: Int, length: Int) {
         showTip(getString(id), length)
     }
 
@@ -533,7 +523,7 @@ class MainActivity :
     /**
      * If activity is running, show snack bar, otherwise show toast
      */
-    fun showTip(message: CharSequence, length: Int) {
+    override fun showTip(message: CharSequence, length: Int) {
         if (mSnackBar != null && !isDrawerOpen) {
             Snackbar.make(
                 mSnackBar!!,
@@ -567,45 +557,25 @@ class MainActivity :
         val id = item.itemId
         when (id) {
             R.id.nav_homepage -> {
-                val args = Bundle()
-                args.putString(GalleryListScene.KEY_ACTION, GalleryListScene.ACTION_HOMEPAGE)
-                startSceneFirstly(
-                    Announcer(GalleryListScene::class.java)
-                        .setArgs(args),
-                )
+                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_HOMEPAGE)))
             }
             R.id.nav_subscription -> {
-                val args = Bundle()
-                args.putString(GalleryListScene.KEY_ACTION, GalleryListScene.ACTION_SUBSCRIPTION)
-                startSceneFirstly(
-                    Announcer(GalleryListScene::class.java)
-                        .setArgs(args),
-                )
+                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_SUBSCRIPTION)))
             }
             R.id.nav_whats_hot -> {
-                val args = Bundle()
-                args.putString(GalleryListScene.KEY_ACTION, GalleryListScene.ACTION_WHATS_HOT)
-                startSceneFirstly(
-                    Announcer(GalleryListScene::class.java)
-                        .setArgs(args),
-                )
+                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_WHATS_HOT)))
             }
             R.id.nav_toplist -> {
-                val args = Bundle()
-                args.putString(GalleryListScene.KEY_ACTION, GalleryListScene.ACTION_TOP_LIST)
-                startSceneFirstly(
-                    Announcer(GalleryListScene::class.java)
-                        .setArgs(args),
-                )
+                startSceneFirstly(announcerFor(homepageRoute(GalleryListScene.ACTION_TOP_LIST)))
             }
             R.id.nav_favourite -> {
-                startScene(Announcer(FavoritesScene::class.java))
+                startRoute(EhRoute.Favorites)
             }
             R.id.nav_history -> {
-                startScene(Announcer(HistoryScene::class.java))
+                startRoute(EhRoute.History)
             }
             R.id.nav_downloads -> {
-                startScene(Announcer(DownloadsScene::class.java))
+                startRoute(EhRoute.Downloads())
             }
             R.id.nav_settings -> {
                 val intent = Intent(this, SettingsActivity::class.java)

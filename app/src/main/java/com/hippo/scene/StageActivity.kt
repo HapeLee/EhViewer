@@ -29,7 +29,7 @@ import com.hippo.yorozuya.AssertUtils
 import com.hippo.yorozuya.IntIdGenerator
 import java.util.concurrent.atomic.AtomicInteger
 
-abstract class StageActivity : EhActivity() {
+abstract class StageActivity : EhActivity(), SceneHost {
     private val mSceneTagList = ArrayList<String?>()
     private val mDelaySceneTagList = ArrayList<String?>()
     private val mIdGenerator = AtomicInteger()
@@ -135,11 +135,11 @@ abstract class StageActivity : EhActivity() {
         (applicationContext as SceneApplication).unregisterStageActivity(stageId)
     }
 
-    open fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {}
+    override fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {}
 
-    open fun onSceneViewDestroyed(scene: SceneFragment) {}
+    override fun onSceneViewDestroyed(scene: SceneFragment) {}
 
-    fun onSceneDestroyed(scene: SceneFragment) {
+    override fun onSceneDestroyed(scene: SceneFragment) {
         mDelaySceneTagList.remove(scene.tag)
     }
 
@@ -151,7 +151,7 @@ abstract class StageActivity : EhActivity() {
 
     protected open fun onTransactScene() {}
 
-    val sceneCount: Int
+    override val sceneCount: Int
         get() = mSceneTagList.size
 
     private fun getSceneLaunchMode(clazz: Class<*>): Int {
@@ -173,7 +173,7 @@ abstract class StageActivity : EhActivity() {
         throw IllegalStateException(clazz.getName() + " can not cast to scene", e)
     }
 
-    fun startScene(announcer: Announcer, horizontal: Boolean = false) {
+    override fun startScene(announcer: Announcer, horizontal: Boolean) {
         val clazz = announcer.clazz
         val args = announcer.args
         val tranHelper = announcer.tranHelper
@@ -323,14 +323,9 @@ abstract class StageActivity : EhActivity() {
         // Commit
         transaction.commitAllowingStateLoss()
         onTransactScene()
-
-        // Check request
-        if (announcer.requestFrom != null && announcer.requestFrom!!.tag != null) {
-            newScene.addRequest(announcer.requestFrom!!.tag!!, announcer.requestCode)
-        }
     }
 
-    fun startSceneFirstly(announcer: Announcer) {
+    override fun startSceneFirstly(announcer: Announcer) {
         val clazz = announcer.clazz
         val args = announcer.args
         val fragmentManager = supportFragmentManager
@@ -412,13 +407,19 @@ abstract class StageActivity : EhActivity() {
 
     fun getSceneIndex(scene: SceneFragment): Int = getTagIndex(scene.tag)
 
+    override fun indexOfScene(scene: SceneFragment): Int = getSceneIndex(scene)
+
     private fun getTagIndex(tag: String?): Int = mSceneTagList.indexOf(tag)
 
     fun sortSceneViews(views: ArrayList<View>) {
         views.sortWith(mSceneViewComparator)
     }
 
-    fun finishScene(scene: SceneFragment, transitionHelper: TransitionHelper? = null) {
+    override fun finishScene(scene: SceneFragment) {
+        finishScene(scene, null)
+    }
+
+    fun finishScene(scene: SceneFragment, transitionHelper: TransitionHelper?) {
         finishScene(scene.tag, transitionHelper)
     }
 
@@ -480,11 +481,6 @@ abstract class StageActivity : EhActivity() {
 
         // Remove tag
         mSceneTagList.removeAt(index)
-
-        // Return result
-        if (scene is SceneFragment) {
-            scene.returnResult(this)
-        }
     }
 
     fun refreshTopScene() {
@@ -544,15 +540,17 @@ abstract class StageActivity : EhActivity() {
         }
     }
 
-    val topSceneClass: Class<*>?
+    override val topSceneClass: Class<*>?
+        get() = topScene?.javaClass
+
+    override val topScene: SceneFragment?
         get() {
             val index = mSceneTagList.size - 1
             if (index < 0) {
                 return null
             }
             val tag = mSceneTagList[index]
-            val fragment = supportFragmentManager.findFragmentByTag(tag) ?: return null
-            return fragment.javaClass
+            return supportFragmentManager.findFragmentByTag(tag) as? SceneFragment
         }
 
     private inner class SceneViewComparator : Comparator<View> {

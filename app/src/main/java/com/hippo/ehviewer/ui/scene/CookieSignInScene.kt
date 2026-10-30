@@ -15,19 +15,14 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.graphics.Paint
-import android.os.Bundle
 import android.util.Log
-import android.view.KeyEvent
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.TextView.OnEditorActionListener
-import androidx.appcompat.app.AlertDialog
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.textfield.TextInputLayout
+import androidx.navigation3.runtime.EntryProviderScope
+import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhCookieStore
@@ -36,127 +31,105 @@ import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.exception.CloudflareBypassException
 import com.hippo.ehviewer.ui.WebViewActivity
+import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.NavResultBus
+import com.hippo.ehviewer.ui.compose.nav.NavSignal
+import com.hippo.ehviewer.ui.compose.nav.SignInSource
+import com.hippo.ehviewer.ui.compose.screen.CookieSignInError
+import com.hippo.ehviewer.ui.compose.screen.CookieSignInScreen
 import com.hippo.network.StatusCodeException
 import com.hippo.util.ExceptionUtils
 import com.hippo.util.getClipboardManager
 import com.hippo.util.getTextFromClipboard
 import com.hippo.util.launchIO
 import com.hippo.util.withUIContext
-import com.hippo.yorozuya.ViewUtils
 import java.util.Locale
 import kotlinx.coroutines.Job
 import okhttp3.Cookie
 
-class CookieSignInScene :
-    SolidScene(),
-    OnEditorActionListener,
-    View.OnClickListener {
-    private var mProgress: View? = null
-    private var mIpbMemberIdLayout: TextInputLayout? = null
-    private var mIpbPassHashLayout: TextInputLayout? = null
-    private var mIpbMemberId: EditText? = null
-    private var mIpbPassHash: EditText? = null
-    private var mOk: View? = null
-    private var mFromClipboard: TextView? = null
-    private var mSignInJob: Job? = null
+/**
+ * Cookie 登录页。
+ *
+ * 迁移点：
+ * - 表单、进度遮罩、错误对话框交给 [CookieSignInScreen]，输入与错误态用 Compose 状态
+ * - 登录协程改挂 `lifecycleScope`，旋转不会丢请求；`storeCookie` 与 Cloudflare 判定不变
+ * - 「从剪贴板填充」逻辑原样保留，只是把结果写进 Compose 状态后自动提交
+ */
+class CookieSignInScene : EhComposeScene() {
+
+    private var memberId by mutableStateOf("")
+    private var passHash by mutableStateOf("")
+    private var memberIdError by mutableStateOf<String?>(null)
+    private var passHashError by mutableStateOf<String?>(null)
+    private var loading by mutableStateOf(false)
+    private var error by mutableStateOf<CookieSignInError?>(null)
+    private var signInJob: Job? = null
 
     override fun needShowLeftDrawer(): Boolean = false
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        val view = inflater.inflate(R.layout.scene_cookie_sign_in, container, false)
-        val loginForm = ViewUtils.`$$`(view, R.id.cookie_signin_form)
-        mProgress = ViewUtils.`$$`(view, R.id.progress)
-        mIpbMemberIdLayout = ViewUtils.`$$`(loginForm, R.id.ipb_member_id_layout) as TextInputLayout
-        mIpbMemberId = mIpbMemberIdLayout!!.editText!!
-        mIpbPassHashLayout = ViewUtils.`$$`(loginForm, R.id.ipb_pass_hash_layout) as TextInputLayout
-        mIpbPassHash = mIpbPassHashLayout!!.editText!!
-        mOk = ViewUtils.`$$`(loginForm, R.id.ok)
-        mFromClipboard = ViewUtils.`$$`(loginForm, R.id.from_clipboard) as TextView
-        mFromClipboard!!.run {
-            paintFlags = paintFlags or Paint.UNDERLINE_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG
-        }
-        mIpbPassHash!!.setOnEditorActionListener(this)
-        mOk!!.setOnClickListener(this)
-        mFromClipboard!!.setOnClickListener(this)
-        return view
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        mProgress = null
-        mIpbMemberIdLayout = null
-        mIpbPassHashLayout = null
-        mIpbMemberId = null
-        mIpbPassHash = null
-        mSignInJob = null
-    }
-
-    private fun showProgress() {
-        if (mProgress?.visibility == View.VISIBLE) return
-        mProgress?.apply {
-            alpha = 0f
-            visibility = View.VISIBLE
-            animate().alpha(1f).setDuration(500).start()
+    @Composable
+    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
+        entry<EhRoute.CookieSignIn> {
+            CookieSignInScreen(
+                memberId = memberId,
+                passHash = passHash,
+                memberIdError = memberIdError,
+                passHashError = passHashError,
+                loading = loading,
+                error = error,
+                onMemberIdChange = {
+                    memberId = it
+                    memberIdError = null
+                },
+                onPassHashChange = {
+                    passHash = it
+                    passHashError = null
+                },
+                onSubmit = ::enter,
+                onFillFromClipboard = ::fillCookiesFromClipboard,
+                onDismissError = { error = null },
+                onOpenForums = {
+                    context?.startActivity(
+                        WebViewActivity.newIntent(requireContext(), EhUrl.URL_FORUMS),
+                    )
+                },
+                onIgnoreError = {
+                    error = null
+                    ok()
+                },
+            )
         }
     }
 
-    private fun hideProgress() {
-        mProgress?.visibility = View.GONE
-    }
-
-    override fun onClick(v: View) {
-        when (v) {
-            mOk -> enter()
-            mFromClipboard -> fillCookiesFromClipboard()
-        }
-    }
-
-    override fun onEditorAction(v: TextView, actionId: Int, event: KeyEvent?): Boolean {
-        if (mIpbPassHash === v) {
-            enter()
-        }
-        return true
-    }
-
-    fun enter() {
-        if (mSignInJob?.isActive == true) return
-        val memberIdField = mIpbMemberId ?: return
-        val passHashField = mIpbPassHash ?: return
-        val memberIdLayout = mIpbMemberIdLayout ?: return
-        val passHashLayout = mIpbPassHashLayout ?: return
-        val memberId = memberIdField.text.toString().trim()
-        val passHash = passHashField.text.toString().trim()
-
-        if (memberId.isEmpty()) {
-            memberIdLayout.error = getString(R.string.text_is_empty)
+    private fun enter() {
+        if (signInJob?.isActive == true || loading) return
+        val id = memberId.trim()
+        val hash = passHash.trim()
+        if (id.isEmpty()) {
+            memberIdError = getString(R.string.text_is_empty)
             return
-        } else {
-            memberIdLayout.error = null
         }
-        if (passHash.isEmpty()) {
-            passHashLayout.error = getString(R.string.text_is_empty)
+        memberIdError = null
+        if (hash.isEmpty()) {
+            passHashError = getString(R.string.text_is_empty)
             return
-        } else {
-            passHashLayout.error = null
         }
+        passHashError = null
         hideSoftInput()
-        showProgress()
+        loading = true
 
-        mSignInJob = viewLifecycleOwner.lifecycleScope.launchIO {
+        signInJob = lifecycleScope.launchIO {
             EhUtils.signOut()
             val result = runCatching {
-                storeCookie(memberId, passHash)
+                storeCookie(id, hash)
                 EhEngine.getProfile().also {
                     Settings.putDisplayName(it.displayName)
                     Settings.putAvatar(it.avatar)
                 }
             }
             withUIContext {
-                hideProgress()
+                loading = false
                 result.onSuccess {
                     ok()
                 }.onFailure {
@@ -167,12 +140,14 @@ class CookieSignInScene :
     }
 
     private fun ok() {
-        setResult(RESULT_OK, null)
+        // cookie 已落 EhCookieStore、资料已落 Settings；这里只通知父页面收尾
+        NavResultBus.publish(NavSignal.SignedIn(SignInSource.COOKIE))
         finish()
     }
 
     private fun showResultErrorDialog(e: Throwable) {
-        val isCloudflareError = e.cause is CloudflareBypassException || (e is StatusCodeException && e.responseCode == 403)
+        val isCloudflareError = e.cause is CloudflareBypassException ||
+            (e is StatusCodeException && e.responseCode == 403)
         val message = buildString {
             append(ExceptionUtils.getReadableString(e))
             append("\n\n")
@@ -182,20 +157,7 @@ class CookieSignInScene :
                 append(getString(R.string.sign_in_failed_tip_2))
             }
         }
-
-        val context = requireContext()
-        AlertDialog.Builder(context)
-            .setTitle(R.string.sign_in_failed)
-            .setMessage(message)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                context.startActivity(WebViewActivity.newIntent(context, EhUrl.URL_FORUMS))
-            }
-            .apply {
-                if (isCloudflareError) {
-                    setNegativeButton(R.string.ignore) { _, _ -> ok() }
-                }
-            }
-            .show()
+        error = CookieSignInError(message = message, canIgnore = isCloudflareError)
     }
 
     private suspend fun storeCookie(id: String, hash: String) {
@@ -208,11 +170,11 @@ class CookieSignInScene :
     }
 
     private fun fillCookiesFromClipboard() {
-        val context = requireContext()
+        val ctx = context ?: return
         fun showClipboardError() = showTip(R.string.from_clipboard_error, LENGTH_SHORT)
         hideSoftInput()
 
-        val clipboardText = context.getClipboardManager().getTextFromClipboard(context)
+        val clipboardText = ctx.getClipboardManager().getTextFromClipboard(ctx)
         if (clipboardText.isNullOrBlank()) {
             showClipboardError()
             return
@@ -244,15 +206,19 @@ class CookieSignInScene :
                 val key = kv[0].trim().lowercase(Locale.getDefault())
                 val value = kv[1].trim().replace(Regex("[^a-zA-Z0-9\\-_.~]"), "")
                 when (key) {
-                    EhCookieStore.KEY_IPB_MEMBER_ID -> mIpbMemberId?.setText(value)
-                    EhCookieStore.KEY_IPB_PASS_HASH -> mIpbPassHash?.setText(value)
+                    EhCookieStore.KEY_IPB_MEMBER_ID -> memberId = value
+                    EhCookieStore.KEY_IPB_PASS_HASH -> passHash = value
                 }
             }
             enter()
         } catch (e: Exception) {
             ExceptionUtils.throwIfFatal(e)
-            Log.e("CookieSignInScene", "Error", e)
+            Log.e(TAG, "Error", e)
             showClipboardError()
         }
+    }
+
+    companion object {
+        private const val TAG = "CookieSignInScene"
     }
 }

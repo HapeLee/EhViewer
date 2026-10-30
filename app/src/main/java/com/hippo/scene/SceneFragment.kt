@@ -21,41 +21,42 @@ import android.view.View
 import androidx.annotation.IntDef
 import androidx.fragment.app.Fragment
 import com.hippo.ehviewer.R
-import com.hippo.yorozuya.collect.IntList
-import kotlin.math.min
 import rikka.core.res.resolveDrawable
 
+/**
+ * 页面基类。
+ *
+ * 栈操作全部交给 [SceneHost]：这里不再出现 `activity is StageActivity` 这类判断，
+ * 所以把宿主换成单一 `NavDisplay` 时，页面代码不需要跟着改。
+ * 旧的 `setResult` / `onSceneResult` 回传机制已移除——状态走仓库、一次性事件走
+ * `NavResultBus`。
+ */
 open class SceneFragment : Fragment() {
-    var result: Bundle? = null
-    private var resultCode = RESULT_CANCELED
-    private var mRequestSceneTagList: MutableList<String> = ArrayList(0)
-    private var mRequestCodeList = IntList()
-
     open fun onNewArguments(args: Bundle) {}
 
+    /** 承载本页面的宿主；attach 之前为 null */
+    val sceneHost: SceneHost?
+        get() = activity as? SceneHost
+
     fun startScene(announcer: Announcer, horizontal: Boolean) {
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.startScene(announcer, horizontal)
-        }
+        sceneHost?.startScene(announcer, horizontal)
     }
 
     fun startScene(announcer: Announcer) {
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.startScene(announcer)
-        }
+        sceneHost?.startScene(announcer)
     }
 
     fun finish(transitionHelper: TransitionHelper? = null) {
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.finishScene(this, transitionHelper)
+        val host = sceneHost ?: return
+        // 转场只有旧 Fragment 栈能表达；新宿主忽略它
+        if (transitionHelper != null && host is StageActivity) {
+            host.finishScene(this, transitionHelper)
+        } else {
+            host.finishScene(this)
         }
     }
 
     fun finishStage() {
-        val activity = activity
         activity?.finish()
     }
 
@@ -63,14 +64,7 @@ open class SceneFragment : Fragment() {
      * @return negative for error
      */
     val stackIndex: Int
-        get() {
-            val activity = activity
-            return if (activity is StageActivity) {
-                activity.getSceneIndex(this)
-            } else {
-                -1
-            }
-        }
+        get() = sceneHost?.indexOfScene(this) ?: -1
 
     open fun onBackPressed() {
         finish()
@@ -83,51 +77,17 @@ open class SceneFragment : Fragment() {
         view.setTag(R.id.fragment_tag, tag)
         view.background =
             requireActivity().getTheme().resolveDrawable(android.R.attr.windowBackground)
-        // Notify
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.onSceneViewCreated(this, savedInstanceState)
-        }
+        sceneHost?.onSceneViewCreated(this, savedInstanceState)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // Notify
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.onSceneViewDestroyed(this)
-        }
+        sceneHost?.onSceneViewDestroyed(this)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        val activity = activity
-        if (activity is StageActivity) {
-            activity.onSceneDestroyed(this)
-        }
-    }
-
-    fun addRequest(requestSceneTag: String, requestCode: Int) {
-        mRequestSceneTagList.add(requestSceneTag)
-        mRequestCodeList.add(requestCode)
-    }
-
-    fun returnResult(stage: StageActivity) {
-        for (i in 0 until min(mRequestSceneTagList.size.toDouble(), mRequestCodeList.size.toDouble()).toInt()) {
-            val tag = mRequestSceneTagList[i]
-            val code = mRequestCodeList[i]
-            val scene = stage.findSceneByTag(tag)
-            scene?.onSceneResult(code, resultCode, result)
-        }
-        mRequestSceneTagList.clear()
-        mRequestCodeList.clear()
-    }
-
-    protected open fun onSceneResult(requestCode: Int, resultCode: Int, data: Bundle?) {}
-
-    fun setResult(resultCode: Int, result: Bundle?) {
-        this.resultCode = resultCode
-        this.result = result
+        sceneHost?.onSceneDestroyed(this)
     }
 
     @IntDef(LAUNCH_MODE_STANDARD, LAUNCH_MODE_SINGLE_TOP, LAUNCH_MODE_SINGLE_TASK)
@@ -140,15 +100,5 @@ open class SceneFragment : Fragment() {
         const val LAUNCH_MODE_STANDARD = 0
         const val LAUNCH_MODE_SINGLE_TOP = 1
         const val LAUNCH_MODE_SINGLE_TASK = 2
-
-        /**
-         * Standard scene result: operation canceled.
-         */
-        const val RESULT_CANCELED = 0
-
-        /**
-         * Standard scene result: operation succeeded.
-         */
-        const val RESULT_OK = -1
     }
 }

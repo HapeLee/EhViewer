@@ -15,21 +15,17 @@
  */
 package com.hippo.ehviewer.ui.scene
 
-import android.annotation.SuppressLint
-import android.app.Dialog
 import android.content.Context
-import android.content.DialogInterface
 import android.content.Intent
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.MenuItem
-import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
-import androidx.recyclerview.widget.RecyclerView
-import com.hippo.easyrecyclerview.EasyRecyclerView
-import com.hippo.easyrecyclerview.MarginItemDecoration
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.navigation3.runtime.EntryProviderScope
+import androidx.navigation3.runtime.NavKey
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhClient
@@ -39,319 +35,218 @@ import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.data.GalleryPreview
 import com.hippo.ehviewer.client.data.PreviewSet
-import com.hippo.ehviewer.client.exception.EhException
 import com.hippo.ehviewer.ui.GalleryActivity
+import com.hippo.ehviewer.ui.compose.EhComposeScene
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.screen.GalleryPreviewsScreen
+import com.hippo.util.ExceptionUtils
 import com.hippo.util.getParcelableCompat
-import com.hippo.widget.ContentLayout
-import com.hippo.widget.ContentLayout.ContentHelper
-import com.hippo.widget.LoadImageView
-import com.hippo.widget.Slider
-import com.hippo.widget.recyclerview.AutoGridLayoutManager
-import com.hippo.yorozuya.LayoutUtils
-import com.hippo.yorozuya.ViewUtils
-import java.util.Locale
 
-class GalleryPreviewsScene : ToolbarScene() {
-    private var mGalleryInfo: GalleryInfo? = null
-    private var mRecyclerView: EasyRecyclerView? = null
-    private var mAdapter: GalleryPreviewAdapter? = null
-    private var mHelper: GalleryPreviewHelper? = null
-    private var mHasFirstRefresh = false
-    private var mScrollTo = 0
+/**
+ * 画廊预览图页。
+ *
+ * 迁移点：
+ * - `ContentLayout` / `ContentHelper` 的分页状态改为这里显式持有的「页块」列表，
+ *   `GalleryPreviewAdapter`、`NotifyDataSetChanged` 和 RecyclerView 生命周期一并消失
+ * - `GalleryDetailScene` 传进来的 [KEY_SCROLL_TO] 语义保持不变：
+ *   `-1` 表示详情页已经展示完第一页预览，从第二页接着看；正数表示在首页内定位到该下标
+ * - 返回本页（view 重建）不会重新请求；只有一页都没拿到时才会重新加载
+ */
+class GalleryPreviewsScene : EhComposeScene() {
+
+    private var galleryInfo: GalleryInfo? = null
+    private var startPage = 0
+
+    /** 已加载的页块，按请求完成的先后追加；页码只影响取数，不影响展示顺序 */
+    private var blocks by mutableStateOf<List<PreviewBlock>>(emptyList())
+    private var items by mutableStateOf<List<GalleryPreview>>(emptyList())
+    private var inFlight by mutableStateOf<Set<Int>>(emptySet())
+    private var error by mutableStateOf<String?>(null)
+    private var topPage by mutableStateOf(0)
+    private var scrollToIndex by mutableStateOf<Int?>(null)
+    private var pendingScrollPage by mutableStateOf<Int?>(null)
+    private var pendingScrollIndex by mutableStateOf<Int?>(null)
+
+    private val totalPages: Int
+        get() = (galleryInfo as? GalleryDetail)?.previewPages?.coerceAtLeast(1) ?: 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) {
-            onInit()
+        val scroll = if (savedInstanceState == null) arguments?.getInt(KEY_SCROLL_TO) ?: 0 else 0
+        galleryInfo = if (savedInstanceState == null) {
+            arguments?.getParcelableCompat(KEY_GALLERY_INFO)
         } else {
-            onRestore(savedInstanceState)
+            savedInstanceState.getParcelableCompat(KEY_GALLERY_INFO)
         }
+        // 详情页已经把首页预览都展示过时（-1），直接从第二页开始；否则从首页开始、按需定位
+        startPage = if (scroll == -1) 1 else 0
+        if (scroll > 0) pendingScrollIndex = scroll
     }
 
-    private fun onInit() {
-        val args = arguments ?: return
-        mGalleryInfo = args.getParcelableCompat(KEY_GALLERY_INFO)
-        mScrollTo = args.getInt(KEY_SCROLL_TO)
-    }
-
-    private fun onRestore(savedInstanceState: Bundle) {
-        mGalleryInfo = savedInstanceState.getParcelableCompat(KEY_GALLERY_INFO)
-        mHasFirstRefresh = savedInstanceState.getBoolean(KEY_HAS_FIRST_REFRESH)
+    override fun onDestroyView() {
+        // view 重建会连同 viewLifecycleOwner 的请求一起取消，这里同步清掉在途标记，
+        // 否则下次进入会因为「还在请求中」而既不加载也不显示进度
+        inFlight = emptySet()
+        super.onDestroyView()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        val hasFirstRefresh: Boolean = if (mHelper != null && 1 == mHelper!!.shownViewIndex) {
-            false
-        } else {
-            mHasFirstRefresh
-        }
-        outState.putBoolean(KEY_HAS_FIRST_REFRESH, hasFirstRefresh)
-        outState.putParcelable(KEY_GALLERY_INFO, mGalleryInfo)
+        outState.putParcelable(KEY_GALLERY_INFO, galleryInfo)
     }
 
-    override fun onCreateViewWithToolbar(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        val mContentLayout = inflater.inflate(
-            R.layout.scene_gallery_previews,
-            container,
-            false,
-        ) as ContentLayout
-        mContentLayout.hideFastScroll()
-        mRecyclerView = mContentLayout.recyclerView
-        mAdapter = GalleryPreviewAdapter()
-        mRecyclerView!!.adapter = mAdapter
-        val columnWidth = Settings.previewSize
-        val layoutManager =
-            AutoGridLayoutManager(context, columnWidth, LayoutUtils.dp2pix(context, 16f))
-        layoutManager.setStrategy(AutoGridLayoutManager.STRATEGY_SUITABLE_SIZE)
-        mRecyclerView!!.layoutManager = layoutManager
-        mRecyclerView!!.clipToPadding = false
-        val padding = LayoutUtils.dp2pix(context, 4f)
-        val decoration = MarginItemDecoration(padding, padding, padding, padding, padding)
-        mRecyclerView!!.addItemDecoration(decoration)
-        mHelper = GalleryPreviewHelper()
-        mContentLayout.setHelper(mHelper!!)
-
-        // Only refresh for the first time
-        if (!mHasFirstRefresh) {
-            mHasFirstRefresh = true
-            if (mScrollTo == -1) {
-                mHelper!!.goTo(1)
-                mScrollTo = 0
-            } else {
-                mHelper!!.firstRefresh()
-            }
-        }
-        return mContentLayout
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        if (null != mHelper) {
-            if (1 == mHelper!!.shownViewIndex) {
-                mHasFirstRefresh = false
-            }
-        }
-        if (null != mRecyclerView) {
-            mRecyclerView!!.stopScroll()
-            mRecyclerView = null
-        }
-        mAdapter = null
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        setTitle(R.string.gallery_previews)
-        setNavigationIcon(R.drawable.v_arrow_left_dark_x24)
-    }
-
-    override fun getMenuResId(): Int = if ((mGalleryInfo as GalleryDetail).previewPages > 1) R.menu.scene_gallery_previews else 0
-
-    override fun onMenuItemClick(item: MenuItem): Boolean {
-        val context = context ?: return false
-        val id = item.itemId
-        if (id == R.id.action_go_to) {
-            if (mHelper == null) {
-                return true
-            }
-            val pages = mHelper!!.pages
-            if (pages > 1 && mHelper!!.canGoTo()) {
-                val helper = GoToDialogHelper(pages, mHelper!!.pageForTop)
-                val dialog = AlertDialog.Builder(context).setTitle(R.string.go_to)
-                    .setView(R.layout.dialog_go_to)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .create()
-                dialog.show()
-                helper.setDialog(dialog)
-            }
-            return true
-        }
-        return false
-    }
-
-    override fun onNavigationClick() {
-        onBackPressed()
-    }
-
-    fun onItemClick(position: Int): Boolean {
-        val context = context
-        if (null != context && null != mHelper && null != mGalleryInfo) {
-            val p = mHelper!!.getDataAtEx(position)
-            if (p != null) {
-                val intent = Intent(context, GalleryActivity::class.java)
-                intent.action = GalleryActivity.ACTION_EH
-                intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, mGalleryInfo)
-                intent.putExtra(GalleryActivity.KEY_PAGE, p.position)
-                startActivity(intent)
-            }
-        }
-        return true
-    }
-
-    private fun onGetPreviewSetSuccess(result: Pair<PreviewSet, Int>, taskId: Int) {
-        if (null != mHelper && mHelper!!.isCurrentTask(taskId) && null != mGalleryInfo) {
-            val previewSet = result.first
-            val size = previewSet.size()
-            val list = ArrayList<GalleryPreview>(size)
-            for (i in 0 until size) {
-                list.add(previewSet.getGalleryPreview(mGalleryInfo!!.gid, i))
-            }
-            mHelper!!.onGetPageData(
-                taskId,
-                result.second,
-                0,
-                null,
-                null,
-                list as List<GalleryPreview>,
+    @Composable
+    override fun EntryProviderScope<NavKey>.registerDestinations(backStack: MutableList<NavKey>) {
+        entry<EhRoute.GalleryPreviews> {
+            LaunchedEffect(Unit) { initialLoad() }
+            val itemSizePx = remember { Settings.previewSize }
+            GalleryPreviewsScreen(
+                title = getString(R.string.gallery_previews),
+                items = items,
+                itemSizePx = itemSizePx,
+                loading = items.isEmpty() && inFlight.isNotEmpty(),
+                loadingMore = items.isNotEmpty() && inFlight.isNotEmpty(),
+                error = error,
+                totalPages = totalPages,
+                topPage = topPage,
+                onBack = { finish() },
+                onItemClick = ::openPage,
+                onLoadMore = ::loadNextPage,
+                onRetry = {
+                    error = null
+                    initialLoad(force = true)
+                },
+                onTopIndexChange = { index -> topPage = pageForIndex(index) },
+                scrollToIndex = scrollToIndex,
+                onScrollHandled = { scrollToIndex = null },
+                onGoToPage = ::goToPage,
             )
-            if (mScrollTo != 0 && mScrollTo < size) {
-                mHelper!!.scrollTo(mScrollTo)
-                mScrollTo = 0
+        }
+    }
+
+    private fun initialLoad(force: Boolean = false) {
+        if (galleryInfo == null) {
+            error = getString(R.string.error_cannot_find_gallery)
+            return
+        }
+        if (!force && (items.isNotEmpty() || inFlight.isNotEmpty())) return
+        loadPage(startPage)
+    }
+
+    private fun loadNextPage() {
+        val last = blocks.lastOrNull()?.page ?: return
+        loadPage(last + 1)
+    }
+
+    private fun loadPage(requestPage: Int) {
+        val info = galleryInfo ?: return
+        if (requestPage < 0 || requestPage >= totalPages) return
+        if (blocks.any { it.page == requestPage } || requestPage in inFlight) return
+        val ctx = context ?: return
+        inFlight = inFlight + requestPage
+        if (items.isEmpty()) error = null
+        val request = EhRequest()
+            .setMethod(EhClient.METHOD_GET_PREVIEW_SET)
+            .setArgs(EhUrl.getGalleryDetailUrl(info.gid, info.token, requestPage, false))
+            .setCallback(GetPreviewSetListener(ctx, requestPage))
+        request.enqueue(this)
+    }
+
+    /** 跳转到指定页（0 基）；该页尚未加载时先取数，到货后再滚动 */
+    private fun goToPage(page: Int) {
+        if (page < 0 || page >= totalPages) {
+            showTip(R.string.error_out_of_range, LENGTH_LONG)
+            return
+        }
+        val block = blocks.firstOrNull { it.page == page }
+        if (block != null) {
+            scrollToIndex = block.start
+        } else {
+            pendingScrollPage = page
+            loadPage(page)
+        }
+    }
+
+    private fun openPage(preview: GalleryPreview) {
+        val ctx = context ?: return
+        val info = galleryInfo ?: return
+        val intent = Intent(ctx, GalleryActivity::class.java).apply {
+            action = GalleryActivity.ACTION_EH
+            putExtra(GalleryActivity.KEY_GALLERY_INFO, info)
+            putExtra(GalleryActivity.KEY_PAGE, preview.position)
+        }
+        startActivity(intent)
+    }
+
+    private fun onGetPreviewSetSuccess(page: Int, previewSet: PreviewSet) {
+        inFlight = inFlight - page
+        val info = galleryInfo ?: return
+        val size = previewSet.size()
+        val list = ArrayList<GalleryPreview>(size)
+        for (i in 0 until size) {
+            list.add(previewSet.getGalleryPreview(info.gid, i))
+        }
+        val start = items.size
+        blocks = blocks + PreviewBlock(page, start, list)
+        items = items + list
+
+        pendingScrollPage?.let { target ->
+            if (target == page) {
+                pendingScrollPage = null
+                scrollToIndex = start
+            }
+        }
+        pendingScrollIndex?.let { index ->
+            if (index < items.size) {
+                pendingScrollIndex = null
+                scrollToIndex = index
             }
         }
     }
 
-    private fun onGetPreviewSetFailure(e: Exception, taskId: Int) {
-        if (mHelper != null && mHelper!!.isCurrentTask(taskId)) {
-            mHelper!!.onGetException(taskId, e)
+    private fun onGetPreviewSetFailure(page: Int, e: Exception) {
+        inFlight = inFlight - page
+        val message = ExceptionUtils.getReadableString(e)
+        if (items.isEmpty()) {
+            error = message
+        } else {
+            showTip(message, LENGTH_LONG)
         }
     }
 
-    private class GalleryPreviewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        var image: LoadImageView = itemView.findViewById(R.id.image)
-        var text: TextView = itemView.findViewById(R.id.text)
+    private fun pageForIndex(index: Int): Int {
+        var result = blocks.firstOrNull()?.page ?: 0
+        for (block in blocks) {
+            if (index >= block.start) result = block.page else break
+        }
+        return result
     }
 
     private inner class GetPreviewSetListener(
         context: Context,
-        private val mTaskId: Int,
+        private val page: Int,
     ) : EhCallback<GalleryPreviewsScene, Pair<PreviewSet, Int>>(context) {
         override fun onSuccess(result: Pair<PreviewSet, Int>) {
-            val scene = this@GalleryPreviewsScene
-            scene.onGetPreviewSetSuccess(result, mTaskId)
+            this@GalleryPreviewsScene.onGetPreviewSetSuccess(page, result.first)
         }
 
         override fun onFailure(e: Exception) {
-            val scene = this@GalleryPreviewsScene
-            scene.onGetPreviewSetFailure(e, mTaskId)
+            this@GalleryPreviewsScene.onGetPreviewSetFailure(page, e)
         }
 
-        override fun onCancel() {}
-    }
-
-    private inner class GalleryPreviewAdapter : RecyclerView.Adapter<GalleryPreviewHolder>() {
-        private val mInflater: LayoutInflater = layoutInflater
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GalleryPreviewHolder = GalleryPreviewHolder(
-            mInflater.inflate(
-                R.layout.item_gallery_preview,
-                parent,
-                false,
-            ),
-        )
-
-        @SuppressLint("SetTextI18n")
-        override fun onBindViewHolder(holder: GalleryPreviewHolder, position: Int) {
-            mHelper?.getDataAtEx(position)?.let {
-                it.load(holder.image)
-                holder.text.text = (it.position + 1).toString()
-            }
-            holder.itemView.setOnClickListener { onItemClick(holder.bindingAdapterPosition) }
-        }
-
-        override fun getItemCount(): Int = if (mHelper != null) mHelper!!.size() else 0
-    }
-
-    private inner class GalleryPreviewHelper : ContentHelper<GalleryPreview>() {
-        override fun getPageData(
-            taskId: Int,
-            type: Int,
-            page: Int,
-            index: String?,
-            isNext: Boolean,
-        ) {
-            val activity = mainActivity
-            if (null == activity || null == mGalleryInfo) {
-                onGetException(taskId, EhException(getString(R.string.error_cannot_find_gallery)))
-                return
-            }
-            val url =
-                EhUrl.getGalleryDetailUrl(mGalleryInfo!!.gid, mGalleryInfo!!.token, page, false)
-            val request = EhRequest()
-            request.setMethod(EhClient.METHOD_GET_PREVIEW_SET)
-            request.setCallback(
-                GetPreviewSetListener(context, taskId),
-            )
-            request.setArgs(url)
-            request.enqueue(this@GalleryPreviewsScene)
-        }
-
-        override val context
-            get() = this@GalleryPreviewsScene.requireContext()
-
-        @SuppressLint("NotifyDataSetChanged")
-        override fun notifyDataSetChanged() {
-            if (mAdapter != null) {
-                mAdapter!!.notifyDataSetChanged()
-            }
-        }
-
-        override fun notifyItemRangeInserted(positionStart: Int, itemCount: Int) {
-            if (mAdapter != null) {
-                mAdapter!!.notifyItemRangeInserted(positionStart, itemCount)
-            }
-        }
-
-        override fun isDuplicate(d1: GalleryPreview, d2: GalleryPreview): Boolean = false
-    }
-
-    private inner class GoToDialogHelper(private val mPages: Int, private val mCurrentPage: Int) :
-        View.OnClickListener,
-        DialogInterface.OnDismissListener {
-        private var mSlider: Slider? = null
-        private var mDialog: Dialog? = null
-        fun setDialog(dialog: AlertDialog) {
-            mDialog = dialog
-            (ViewUtils.`$$`(dialog, R.id.start) as TextView).text =
-                String.format(Locale.US, "%d", 1)
-            (ViewUtils.`$$`(dialog, R.id.end) as TextView).text =
-                String.format(Locale.US, "%d", mPages)
-            mSlider = ViewUtils.`$$`(dialog, R.id.slider) as Slider
-            mSlider!!.setRange(1, mPages)
-            mSlider!!.progress = mCurrentPage + 1
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(this)
-            dialog.setOnDismissListener(this)
-        }
-
-        override fun onClick(v: View) {
-            if (null == mSlider) {
-                return
-            }
-            val page = mSlider!!.progress - 1
-            if (page in 0 until mPages && mHelper != null) {
-                mHelper!!.goTo(page)
-                if (mDialog != null) {
-                    mDialog!!.dismiss()
-                    mDialog = null
-                }
-            } else {
-                showTip(R.string.error_out_of_range, LENGTH_LONG)
-            }
-        }
-
-        override fun onDismiss(dialog: DialogInterface) {
-            mDialog = null
-            mSlider = null
+        override fun onCancel() {
+            inFlight = inFlight - page
         }
     }
+
+    private data class PreviewBlock(
+        val page: Int,
+        val start: Int,
+        val items: List<GalleryPreview>,
+    )
 
     companion object {
         const val KEY_GALLERY_INFO = "gallery_info"
         const val KEY_SCROLL_TO = "scroll_to"
-        private const val KEY_HAS_FIRST_REFRESH = "has_first_refresh"
     }
 }

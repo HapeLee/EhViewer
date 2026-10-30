@@ -1,5 +1,5 @@
 [versions]
-agp = "8.13.2"
+agp = "9.4.1"
 androidx-activity = "1.13.0"
 androidx-appcompat = "1.8.0"
 androidx-biometric = "1.4.0-alpha02"
@@ -17,10 +17,28 @@ androidx-swiperefreshlayout = "1.2.0"
 #noinspection GradleDependency
 androidx-webkit = "1.15.0"
 coil = "3.5.0"
+# 阅读器：缩放/平移 + 大图自动分块（替代自绘 GL 分块上传）
+telephoto = "0.19.0"
+# 纯 JVM 压缩库（替代 libarchive），见 docs/compose-kotlin-refactor-plan.md 3.3
+# RAR/CBR 暂不支持：入口只有「从文件管理器用 EhViewer 打开」，且 CBC/RAR 属长尾，
+# 需要时再把 junrar 8.1.2 作为独立 backend 加回来
+commons-compress = "1.28.0"
+junit = "4.13.2"
+xz = "1.10"
+zip4j = "2.11.5"
+# Material 3 Expressive：目前只有 Compose 侧提供 Expressive 组件与主题
+compose-bom = "2026.09.00"
+# Compose 核心整线必须同版本：material3 1.5 传递要求 foundation 1.13，
+# 而 platform(compose-bom) 不是 enforcedPlatform，BOM 的 1.12.1 会让整线静默落在旧版本
+composeTrain = "1.13.0-beta01"
 drawer = "1.0.3"
+material3 = "1.5.0-beta01"
+navigation3 = "1.2.0"
 google-android-material = "1.14.0"
 jsoup = "1.23.2"
-kotlin = "2.3.21"
+# 与 AGP 9.4.1 内置 Kotlin（kotlin-stdlib 2.4.10）对齐；
+# AGP 9 起不再应用 org.jetbrains.kotlin.android，编译器版本由 AGP 决定
+kotlin = "2.4.10"
 kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
 kotlinx-serialization = "1.12.0"
@@ -34,6 +52,7 @@ spotless = "8.10.4"
 
 [libraries]
 androidx-activity = { module = "androidx.activity:activity-ktx", version.ref = "androidx-activity" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
 androidx-biometric = { module = "androidx.biometric:biometric-ktx", version.ref = "androidx-biometric" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "androidx-browser" }
@@ -42,7 +61,11 @@ androidx-coordinatorlayout = { module = "androidx.coordinatorlayout:coordinatorl
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
 androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "androidx-fragment" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "androidx-lifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle" }
+androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "androidx-lifecycle" }
 androidx-paging-runtime = { module = "androidx.paging:paging-runtime-ktx", version.ref = "androidx-paging" }
+androidx-paging-compose = { module = "androidx.paging:paging-compose", version.ref = "androidx-paging" }
 androidx-preference = { module = "androidx.preference:preference-ktx", version.ref = "androidx-preference" }
 androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "androidx-recyclerview" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "androidx-room" }
@@ -50,10 +73,35 @@ androidx-room-paging = { module = "androidx.room:room-paging", version.ref = "an
 androidx-swiperefreshlayout = { module = "androidx.swiperefreshlayout:swiperefreshlayout", version.ref = "androidx-swiperefreshlayout" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "androidx-webkit" }
 
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+androidx-compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "composeTrain" }
+androidx-compose-animation = { module = "androidx.compose.animation:animation", version.ref = "composeTrain" }
+androidx-compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "composeTrain" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui", version.ref = "composeTrain" }
+androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics", version.ref = "composeTrain" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "composeTrain" }
+androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "composeTrain" }
+# 注意：MaterialExpressiveTheme 只在 material3 1.5.x 公开（1.4.0 里是 internal），
+# 而 1.5.x 需要整条 compose train 1.13；升级工具链时见 docs/tech-stack-upgrade-report.md
+androidx-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+
+# Navigation 3（Compose 导航，取代自研 Scene 栈）
+androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
+androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+
 coil = { module = "io.coil-kt.coil3:coil" }
 coil-bom = { module = "io.coil-kt.coil3:coil-bom", version.ref = "coil" }
 coil-gif = { module = "io.coil-kt.coil3:coil-gif" }
 coil-network = { module = "io.coil-kt.coil3:coil-network-okhttp" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose" }
+telephoto-zoomable-image-coil3 = { module = "me.saket.telephoto:zoomable-image-coil3", version.ref = "telephoto" }
+
+# 纯 JVM 压缩：ZIP/CBZ、7z、TAR/XZ（RAR 暂不支持）
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
+
+junit = { module = "junit:junit", version.ref = "junit" }
 
 drawer = { module = "com.drakeet.drawer:drawer", version.ref = "drawer" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
@@ -85,6 +133,7 @@ rikkax = ["rikkax-core", "rikkax-insets", "rikkax-layoutinflater", "rikkax-mater
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

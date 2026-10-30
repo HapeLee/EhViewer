@@ -396,6 +396,10 @@ object Settings {
     val listMode: Int
         get() = getIntFromStr(KEY_LIST_MODE, DEFAULT_LIST_MODE)
 
+    fun putListMode(value: Int) {
+        putIntToStr(KEY_LIST_MODE, value)
+    }
+
     val detailSize: Int
         get() = dip2px(40 * getInt(KEY_DETAIL_SIZE, DEFAULT_DETAIL_SIZE))
 

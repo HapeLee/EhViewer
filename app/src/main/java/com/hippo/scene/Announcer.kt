@@ -20,8 +20,6 @@ import android.os.Bundle
 class Announcer(var clazz: Class<*>) {
     var args: Bundle? = null
     var tranHelper: TransitionHelper? = null
-    var requestFrom: SceneFragment? = null
-    var requestCode = 0
 
     fun setArgs(args: Bundle?): Announcer {
         this.args = args
@@ -30,12 +28,6 @@ class Announcer(var clazz: Class<*>) {
 
     fun setTranHelper(tranHelper: TransitionHelper?): Announcer {
         this.tranHelper = tranHelper
-        return this
-    }
-
-    fun setRequestCode(requestFrom: SceneFragment?, requestCode: Int): Announcer {
-        this.requestFrom = requestFrom
-        this.requestCode = requestCode
         return this
     }
 }

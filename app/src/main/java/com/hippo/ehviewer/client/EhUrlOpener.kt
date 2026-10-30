@@ -15,46 +15,42 @@
  */
 package com.hippo.ehviewer.client
 
-import android.os.Bundle
 import android.text.TextUtils
 import android.util.Log
 import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser
 import com.hippo.ehviewer.client.parser.GalleryListUrlParser
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
-import com.hippo.ehviewer.ui.scene.GalleryDetailScene
-import com.hippo.ehviewer.ui.scene.GalleryListScene
-import com.hippo.ehviewer.ui.scene.ProgressScene
-import com.hippo.scene.Announcer
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
 
+/**
+ * 外部链接 → route。
+ *
+ * 以前返回 `Announcer`（类名 + Bundle），现在直接给类型化路由：
+ * 链接能表达的就这三种（列表 / 详情 / 分页），够预先一眼看全。
+ */
 object EhUrlOpener {
     private val TAG = EhUrlOpener::class.java.simpleName
-    fun parseUrl(url: String): Announcer? {
+
+    fun parseUrl(url: String): EhRoute? {
         if (TextUtils.isEmpty(url)) {
             return null
         }
         val listUrlBuilder = GalleryListUrlParser.parse(url)
         if (listUrlBuilder != null) {
-            val args = Bundle()
-            args.putString(GalleryListScene.KEY_ACTION, GalleryListScene.ACTION_LIST_URL_BUILDER)
-            args.putParcelable(GalleryListScene.KEY_LIST_URL_BUILDER, listUrlBuilder)
-            return Announcer(GalleryListScene::class.java).setArgs(args)
+            return EhRoute.GalleryList(galleryQueryOf(listUrlBuilder))
         }
         val result1 = GalleryDetailUrlParser.parse(url)
         if (result1 != null) {
-            val args = Bundle()
-            args.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_GID_TOKEN)
-            args.putLong(GalleryDetailScene.KEY_GID, result1.gid)
-            args.putString(GalleryDetailScene.KEY_TOKEN, result1.token)
-            return Announcer(GalleryDetailScene::class.java).setArgs(args)
+            return EhRoute.GalleryDetail(gid = result1.gid, token = result1.token)
         }
         val result2 = GalleryPageUrlParser.parse(url)
         if (result2 != null) {
-            val args = Bundle()
-            args.putString(ProgressScene.KEY_ACTION, ProgressScene.ACTION_GALLERY_TOKEN)
-            args.putLong(ProgressScene.KEY_GID, result2.gid)
-            args.putString(ProgressScene.KEY_PTOKEN, result2.pToken)
-            args.putInt(ProgressScene.KEY_PAGE, result2.page)
-            return Announcer(ProgressScene::class.java).setArgs(args)
+            return EhRoute.Progress(
+                gid = result2.gid,
+                pToken = result2.pToken,
+                page = result2.page,
+            )
         }
         Log.i(TAG, "Can't parse url: $url")
         return null

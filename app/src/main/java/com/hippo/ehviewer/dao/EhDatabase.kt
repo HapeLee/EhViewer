@@ -25,7 +25,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [BookmarkInfo::class, DownloadInfo::class, DownloadLabel::class, DownloadDirname::class, Filter::class, HistoryInfo::class, LocalFavoriteInfo::class, QuickSearch::class],
     version = 4,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class EhDatabase : RoomDatabase() {
     abstract fun bookmarksBao(): BookmarksDao
@@ -41,5 +41,7 @@ abstract class EhDatabase : RoomDatabase() {
 fun buildMainDB(context: Context): EhDatabase {
     // TODO: Remove allowMainThreadQueries
     return Room.databaseBuilder(context, EhDatabase::class.java, "eh.db").allowMainThreadQueries()
+        // 按“新项目”口径处理：不背历史迁移链，schema 变动时整库重建
+        .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
 }

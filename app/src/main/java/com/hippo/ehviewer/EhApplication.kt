@@ -97,7 +97,6 @@ class EhApplication :
             handler?.uncaughtException(t, e)
         }
         super.onCreate()
-        System.loadLibrary("ehviewer")
         Settings.initialize()
         ReadableTime.initialize(this)
         AppConfig.initialize(this)
@@ -213,11 +212,9 @@ class EhApplication :
     override fun newImageLoader(context: Context) = ImageLoader.Builder(context).apply {
         serviceLoaderEnabled(false)
         components {
-            if (isAtLeastP) {
-                add(AnimatedImageDecoder.Factory(false))
-            } else {
-                add(GifDecoder.Factory())
-            }
+            // minSdk 31，AnimatedImageDecoder 一定可用；默认会重写过小的 GIF 帧延迟，
+            // 不再需要 jni 里的 rewriteGifSource 补丁
+            add(AnimatedImageDecoder.Factory())
             add(
                 NetworkFetcher.Factory(
                     networkClient = { coilOkHttpClient.asNetworkClient() },
