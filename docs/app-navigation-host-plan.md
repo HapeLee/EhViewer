@@ -352,3 +352,499 @@ fragment 由 `FragmentFactory` 反射创建，入参由 `route.toLegacyArgs(cach
 
 验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
 `:app:assembleDebug` 全绿。
+
+### 10.10 P7-c 第三子片：收藏页出壳（第七个落地片）
+
+`FavoritesScene` 换成 `@Composable` + `FavoritesViewModel`（`ui/scene/FavoritesViewModel.kt`）。
+收藏页比前两页重：分类抽屉、分页、多选修改收藏（删除 / 移动 / 从本地加到云端）、按日期跳转
+都在这一页，所以状态没有留在组合里，而是整体搬进 ViewModel——`Nav3` 的
+`rememberViewModelStoreNavEntryDecorator` 让 ViewModel 的生命周期等于「在返回栈里」，
+旋转不重建列表，与旧 Fragment 一致。
+
+生命周期 / 宿主能力的对应关系：
+
+| 旧（`SceneFragment`） | 新 |
+|---|---|
+| `onCreate` 里 `loadCurrent()`（实际在 entry 的 `LaunchedEffect`） | ViewModel `init` |
+| `onResume` 同步 `listMode` | `OnHostResume { vm.syncListMode() }` |
+| `onBackPressed`：多选 → 搜索 → 退出页面 | `BackHandler(enabled = 有选中 \|\| searchMode)`，其余情况交回 `NavDisplay` |
+| `onSaveInstanceState` 存 `urlBuilder` / `searchMode` / `favCountArray` | 不需要（ViewModel 活过旋转） |
+| `EhRequest.enqueue(this)` | `enqueue(viewModelScope)`（ViewModel clear 时请求一起取消） |
+| `getString` / `context` | 构造时传入的 `applicationContext` |
+| 回调里直接 `showTip` | 一次性 `tip` 状态，由场景 `LaunchedEffect` 消费后 `consumeTip()` |
+
+`MaterialDatePicker` 这一片**没有**换成 Compose 对话框：它只需要宿主 Activity 的
+`supportFragmentManager`，而 `LocalContext` 拿到的就是 `MainActivity`，改造收益小于
+同时换交互形态的风险，留到 P7-d 收口。
+
+**顺手修的真 bug**：上一片（10.9）注册 `entry<EhRoute.Downloads> { DownloadsScene(it) }`
+之后，忘了删掉兼容承载组里那行 `entry<EhRoute.Downloads> { CompatSceneEntry(it) }`。
+`entryProvider` 对同一个 key 是「后注册覆盖先注册」，而 `compatSceneClassNameOf(Downloads)`
+已经返回 `null`——下载页会渲染成空白。两行重复一起清掉，兼容承载组只剩仍未出壳的页面。
+
+`EhRoutes` 同步收口：`Favorites` 加进 `compatSceneClassNameOf` 的 `null` 分支（不再需要
+`CompatSceneEntry`），`legacyRouteOf` 里那条旧类名映射删除（收藏页没有外部 Intent 入口）。
+
+**已知取舍**：进程被杀后重建时，`urlBuilder` 里的搜索关键词 / `searchMode` 不再恢复
+（旧实现存了 `onSaveInstanceState`）。收藏夹分类不受影响——它走 `Settings.recentFavCat`。
+若要补齐，得让 ViewModel 带 `SavedStateHandle`，这一片先不做。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.11 P7-c 第四子片：信息 / 进度 2 页出壳（第八个落地片）
+
+`GalleryInfoScene` / `ProgressScene` 换成 `@Composable`，兼容承载组只剩
+`GalleryList` / `GalleryDetail` / `GalleryPreviews` / `GalleryComments` / `Reader` 五页
+（`Reader` 卡在 `GalleryActivity` 的 Uri 通道，见 10.5）。
+
+**信息页**：route 只带 `gid`，整块 `GalleryDetail` 不再经 `arguments` 传递，改成
+`cachedGalleryDetail(route)` 读 `galleryDetailCache`（详情页加载成功时写入）。
+缓存未命中就是空列表——与出壳前 `toLegacyArgs` 传 `null` 的表现一致，不额外发请求。
+`getString` 换成组合里的 `LocalContext`，行构造提成顶层 `buildInfoRows`；
+复制动作仍是 `addTextToClipboard(value, false)`，需要时再补
+`Settings.putClipboardTextHashCode`（避免宿主把刚复制的画廊链接又弹一次）。
+
+**进度页**：两种状态（进行中 / 失败可重试）加一跳（换 token 成功 → `replaceTop` 到详情页）
+搬进 `ProgressViewModel`。出壳前的旋转语义是「`onSaveInstanceState` 存参数、`onCreate`
+重跑一次请求」；现在 ViewModel 活过旋转、请求不重发。为此补了两条防护：
+
+- `start(route)` 只在参数真的变了才重跑；
+- 回调里再比对一次 route，旧结果作废。
+
+否则同槽位换参数时，会拿旧 token 跳到错误的分页。`EhRequest.enqueue()`（走 `GlobalScope`）
+改成 `enqueue(viewModelScope)`，页面被 `replaceTop` 换掉时在途请求一起取消。
+「进度页不解锁左侧抽屉」原本是 `needShowLeftDrawer()` 覆写，现在由 `EhRoute.hasLeftDrawer`
+表达，场景里没有额外代码。
+
+`EhRoutes` 收口：两页并入 `compatSceneClassNameOf` 的 `null` 分支，`toLegacyArgs` 与
+`legacyRouteOf` 里对应的分支（连同 `KEY_*` / `ACTION_*` 常量引用）一并删除——这两页都没有
+外部 Intent 入口，参数只从 route 来。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.12 P7-c 第五子片：预览图页出壳（第九个落地片）
+
+`GalleryPreviewsScene` 换成 `@Composable` + `GalleryPreviewsViewModel`，
+兼容承载组只剩 `GalleryList` / `GalleryDetail` / `GalleryComments` / `Reader` 四页。
+
+**分页状态**：出壳前是 `SceneFragment` 里的「页块」列表（每块记录服务端分页在合并列表里的
+起点），这套逻辑原样搬进 ViewModel。两处由此变干净：
+
+- 旧 `onDestroyView` 要手动清 `inFlight`——view 重建会取消请求，不清就会「既不加载也不显示
+  进度」。请求现在跟着 `viewModelScope` 走，这个补丁直接删掉。
+- 旋转不再丢已加载的页块（旧实现只存了 `GalleryInfo`，重建后从 `startPage` 重来）。
+
+**缓存取代 `arguments`**：整块 `GalleryInfo` 不再经旧 `Bundle` 传，改为
+`cachedGalleryDetail(route)` 取。拿不到就与出壳前 `arguments` 里没有 `GalleryInfo` 一致——
+直接报「找不到画廊」，不额外发请求。
+
+`scrollTo` 的语义原样保留（`-1` = 详情页已展示完首页预览、从第二页接着看；正数 = 首页内定位），
+因为它是 `GalleryDetailScene.showPreviews()` 算好放进 route 的，与页面实现无关。
+
+点缩略图仍然起 `GalleryActivity`（旧阅读器的 Intent 协议）——阅读器出壳卡在 Uri 通道，
+这一片不碰。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.13 P7-c 第六子片：评论页出壳（第十个落地片）
+
+`GalleryCommentsScene` 换成 `@Composable` + `GalleryCommentsViewModel`，
+兼容承载组只剩 `GalleryList` / `GalleryDetail` / `Reader` 三页。
+
+**从「整块 `GalleryDetail`」改成「只要四个字段」**：出壳前靠 `arguments` 传 `GalleryDetail`
+（`onSaveInstanceState` 里还存了一份）。现在请求用的 `gid` / `token`、投票用的
+`apiUid` / `apiKey` 全都来自 `EhRoute.GalleryComments`，缓存里的详情只在两处出现：
+
+- 首次进页时的「评论列表从哪来」（`GalleryCommentsStore.latest(gid)` 优先于详情里的快照）
+- 「打开链接」时作为 `UrlOpener.openUrl(..., galleryDetail)` 的上下文
+
+也就是说缓存未命中不再是功能性问题——评论照常能拉、能发、能投票。
+
+**生命周期对应**：
+
+| 旧 | 新 |
+|---|---|
+| `onBackPressed`：评论框开着就关框，否则退出 | `BackHandler(enabled = composerVisible)`，顶栏返回箭头走同一分支 |
+| `onSaveInstanceState` 存 `GalleryDetail` | 不需要（ViewModel 活过旋转） |
+| 发评论/关评论框后 `hideSoftInput()` | ViewModel 递增 `hideKeyboardRequests`，场景 `LaunchedEffect` 里收键盘（初值 0 不触发） |
+| `EhRequest.enqueue(this)` | `enqueue(viewModelScope)` |
+
+富文本 → BBCode 的转换留在场景里（`AnnotatedString.toSpannable().toBBCode().trim()`），
+ViewModel 只接收最终字符串和 `commentId`，不依赖 Compose 文本类型。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.14 P7-c 第七子片：画廊列表页出壳（第十一个落地片）
+
+`GalleryListScene` 换成 `@Composable` + `GalleryListViewModel`。这一页五个入口
+（首页 / 订阅 / 热门 / 榜单 / 任意搜索结果）共用，是 P7-c 里状态最多的一页。
+
+**入口常量搬进 nav 包**：`Settings.launchPageGalleryListSceneAction` 存的是
+`"action_homepage"` 这类字符串，值直接搬成 `LIST_ACTION_*`，**字符串不变**，
+老用户的「启动页」设置继续有效。`MainActivity` 的四个抽屉入口一并改用新常量。
+
+**就地搜索不换页面**：搜索改的是 `urlBuilder`，route 保持原样——与出壳前一致
+（旧实现也是「重置 urlBuilder + 重发请求」，不压新栈）。代价是抽屉勾选不再能从 route 推导，
+所以 ViewModel 多一个 `navCheckedRes`，换模式时推给宿主；`EhRoute.navCheckedItem` 只管
+「刚进页面时的高亮」。
+
+**返回键**：双击退出只在栈底生效。为此给 `EhNavigator` 加了 `isRoot`——旧实现看的是
+`stackIndex`，Nav3 的 entry 不知道自己排第几，只能问控制器。非栈底页面不注册 `BackHandler`，
+交给 `NavDisplay` 弹栈。
+
+**其余对应**：
+
+| 旧 | 新 |
+|---|---|
+| `registerForActivityResult` 选图 | `rememberLauncherForActivityResult(PickVisualMedia)` |
+| `onResume` 同步 `listMode` | `OnHostResume { vm.syncListMode() }` |
+| `DownloadManager.add/removeDownloadInfoListener`（`onCreate`/`onDestroy`） | `init` / `onCleared` |
+| 收藏槽位、下载状态就地改 `GalleryInfo` + `version++` | 原样保留，快照里带 `version` |
+
+**已知取舍**：进程被杀重建后，页面回到 route 里那份原始查询（旧实现把 `ListUrlBuilder`
+存进 `onSaveInstanceState`），搜索关键词与榜单页码会丢。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.15 P7-c 第八子片：画廊详情页出壳（第十二个落地片，P7-c 收尾）
+
+`GalleryDetailScene` 换成 `@Composable` + `GalleryDetailViewModel`。这是最后一块大石头：
+
+- **数据装载**：参数只从 `EhRoute.GalleryDetail` 来；`galleryDetailCache` 命中就直接进
+  `NORMAL`，未命中才请求。请求回调仍登记进 `application` 的全局表（旧 Intent 协议要按 id
+  找请求者，`putGlobalStuff` 本身不是去重），`onCleared` 里按 id 摘掉。
+  「本页已经在请求中」的判断还是 `requestId != -1 && containGlobalStuff(requestId)`。
+- **收藏 / 下载 / 评分 / 标签投票 / 归档 / 种子**：请求全在 ViewModel，用 `viewModelScope`；
+  归档与种子列表的结果缓存在 ViewModel 里，对话框第二次打开不重新请求（与旧行为一致）。
+- **四个对话框留在场景**：评分 / 归档 / 种子 / 删除下载仍用原 XML 布局 + `AlertDialog`。
+  理由是一次弹出一次关闭，丢掉不影响页面状态——出壳前的 `AlertDialog` 同样活不过重建；
+  但请求本身已经不随 Activity 销毁而取消。
+- **`syncCommentsFromStore()`** 保留（旧实现已有）：评论页只写 `GalleryCommentsStore`，
+  详情页回前台读一次，不依赖 `setResult` 回传。
+
+**已知取舍**：`onProvideAssistContent` 的 `webUri` 没有对应钩子（Fragment 生命周期回调里的
+能力），暂时不设置。
+
+**收尾状态**：`compatSceneClassNameOf()` 只剩 `EhRoute.Reader` 一个非 null 分支。
+阅读器卡在 `GalleryActivity` 的 `Uri` 通道（`setDataAndType(uri, "image/*")`），
+参数表达不进 route；要出壳得先把阅读器入口改成 `EhRoute.Reader(page)` 这类结构化参数，
+那是 P7-d 的事。`CompatSceneEntry` / `com.hippo.scene` 的删除（P7-e）已经可以排期。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.16 P7-e：删掉旧 Scene 层（第十三个落地片）
+
+页面全部出壳之后，`SceneFragment` 这一层只剩「为了编译通过」的存在。这一片把它整体删掉：
+
+**删掉的文件**（13 个）：
+
+| 范围 | 文件 |
+|---|---|
+| 旧场景框架 | `com/hippo/scene/` 四个：`SceneFragment` / `SceneHost` / `Announcer` / `TransitionHelper` |
+| 旧场景基类 | `BaseScene` / `ToolbarScene` / `SolidScene` / `ReaderScene` / `TransitionNameFactory` |
+| 旧胶水 | `EhComposeScene` / `EhCallback` / `CompatSceneEntry`（含 `compatContainerIdOf`） |
+| 旧列表控件 | `GalleryAdapter` / `GalleryHolder`（已被 Compose 列表取代） |
+
+**`BaseScene.LENGTH_SHORT/LONG` → `TIP_LENGTH_SHORT/LONG`**：取值不变（`0`/`1`），
+搬到 `ui/host/EhHost.kt` 与 `showTip(length)` 放在一起，调用方不再需要 import 场景层。
+
+**`EhCallback` 的两件事分头处理**：`showTip` 现在由回调闭包里调宿主
+（`{ resId, len -> host.showTip(context.getString(resId), len) }`，见 `HistoryScene`），
+`cancel()` 由 ViewModel 的 `viewModelScope` 统一接管——原来的「持有 Context 以便随时弹 Toast」
+这个理由已经不存在了。
+
+**Intent 里不再传「类名 + arguments」**：`UrlOpener` 在别的窗口里拿到画廊链接时，
+把 route 用 CBOR 序列化后放进 `KEY_SCENE_ROUTE`，宿主 `decodeRoute` 再压栈
+（`encodeRoute` / `decodeRoute` 在 `EhRoutes.kt`，序列化格式与 Nav3 保存返回栈一致）。
+下载页仍然走「名字 + 两个标量」——那是 `DownloadService` 在服务进程里拼的 Intent，
+拿不到 route 对象，`legacyRouteOf` 只为它保留了这一个分支。
+
+**`EhRoute.Reader` 一起删了**：全仓没有生产者（阅读器跑在 `GalleryActivity` 里），
+留一个永远压不进栈的 route 只会误导人。阅读器要进 Nav3，得先把它改成
+`EhRoute.Reader(gid, page)` 并从 `GalleryActivity` 的 `Uri` 通道迁移出来——那是 P7-d。
+
+**已知影响**：升级后如果 `SavedState` 里还留着带 `Reader` 项的旧返回栈，恢复会失败，
+重开应用即可（一次性）。
+
+**剩下的收尾（P7-f）**：`ui/scene` 包现在放的是「Compose 场景 + ViewModel」，
+名字和内容已经不符；`scene_*.xml` / `dialog_rate.xml` 之外的旧布局、`R.id` 引用
+（`right_drawer` 等）也可以一起清。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.17 P7-f：按功能拆包 + 清死资源（第十四个落地片）
+
+**`ui/scene` → `ui/page`**：`SceneFragment` 已经删了，目录名却还在暗示 Fragment。拆成
+
+```
+ui/page/security/   SecurityScene / SignInScene / SelectSiteScene / CookieSignInScene / WebViewSignInScene
+ui/page/history/    HistoryScene
+ui/page/favorites/  FavoritesScene + FavoritesViewModel
+ui/page/downloads/  DownloadsScene
+ui/page/gallery/    List / Detail / Info / Previews / Comments / Progress（各带 ViewModel）
+```
+
+类名保持 `*Scene`：改名要牵动文档与几十处注释，功能收益为零，等合适的机会一起做。
+拆包只用了 `git mv`（历史保留）+ 改 `package` 行 + 宿主 14 个 import——
+拆得动的前提是**页面之间没有互相引用**：每个页面只被 `EhNavHostActivity` 的
+`entryProvider` 引用一次，跨页跳转一律走 `EhRoute`。这也是 P7-c 坚持「页面不直接 new 页面」
+换来的红利。
+
+`SCENE_NAME_DOWNLOADS` 保留原字符串值（`com.hippo.ehviewer.ui.scene.DownloadsScene`）：
+`DownloadService` 在服务进程里按这个值发 Intent，改值会让运行中的服务打不开下载页。
+代码里已经标注「只当协议常量，不要反射」。
+
+**清掉的死资源**（22 个）：
+
+- 布局 4 个：`item_gallery_grid` / `item_gallery_list` / `item_gallery_list_thumb_height` / `scene_toolbar`
+- 动画 4 个：`anim/scene_*.xml`（`TransitionHelper` 删掉后无人使用）
+- 图标 / 背景 14 个：`v_archive_primary_x48`、`v_heart_*`、`v_share_primary_x48`、`v_similar_primary_x48`、
+  `v_utorrent_primary_x48`、`v_last_page_x24`、`v_pencil_dark_x24`、`v_pin_top_24`、
+  `v_dots_vertical_secondary_dark_x24`、`category_background`、`tile_background`、`round_side_rect`、`spacer_x6`
+
+**踩坑提醒**：`res/xml/` 下的 `backup_scheme` / `data_extraction_rules` / `filepaths` / `locale_config`
+在代码里零引用，看起来同样该死——但它们由 `AndroidManifest.xml` 以 `@xml/...` 引用，
+判断死资源时必须把 Manifest 和 XML 里的 `@xxx/name` 一起算进来。
+
+**还可以继续清的**：`activity_main.xml` 里已经没人填充的 `right_drawer`
+（`DrawerView` + `mRightDrawer` 的可见性判断）、以及一堆只被布局引用的 `values` 条目。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.18 收尾清理：右侧抽屉 + 死 dimens + 传输层单测（第十五个落地片）
+
+**右侧抽屉整条链路删掉**：`activity_main.xml` 的 `right_drawer` 节点、`MainActivity.mRightDrawer`
+字段与初始化、`isDrawerOpen` 里对它的判断、以及 `com.hippo.widget.DrawerView` 这个控件本身。
+出壳之后右侧抽屉由各页自己的 Compose 抽屉承担（收藏分类、快速搜索、下载标签都搬过去了），
+宿主那层 `DrawerLayout` 只剩左侧导航。顺带好处：`showTip` 的「抽屉开着就关掉抽屉」判断
+少了一个永远为 false 的分支。
+
+**dimens 清 31 条**：`gallery_list_*` / `gallery_grid_*` / `search_*` / `fab_*` /
+`gallery_detail_thumb_*` 这些只服务于已删布局的尺寸。复核口径要**同时**查 `@dimen/x`
+和 `R.dimen.x`——`dad_*`（DrawerArrowDrawable）、`add_*`、`rating_*`、`lock_pattern_*`
+看着零引用，其实全是在 Java 控件里按 `R.dimen` 取的。`values/strings.xml` 暂不动：
+删一条默认字符串要在所有 `values-*/` 里同步删，容易误伤，留到专门的资源清理里做。
+
+**补上传输层单测**（`EhRouteTransportTest`，4 例）：P7-e 引入的
+`encodeRoute` / `decodeRoute` 是启动路径上的新机制，之前零覆盖。现在锁住：
+
+1. 9 种 route 的 CBOR 载荷往返；
+2. 坏载荷 / 空载荷安静退化成 `null`（宿主回落到初始页，而不是崩在启动路径）；
+3. 抽屉勾选项按列表模式推导（`nav_homepage` / `nav_subscription` / `nav_whats_hot` / `nav_toplist`，
+   图片搜索与上传者列表不勾任何项）；
+4. 只有抽屉入口才勾选（`Favorites` / `History` / `Downloads` 有，守卫页与详情页为 `0`）。
+
+同时把 `EhRouteCodecTest` 里那个「测试专用的常量替身」删掉，改用真正的 `LIST_ACTION_*`——
+常量搬到 nav 包之后，替身存在的理由（避免把 Scene 拖进 JVM 单测）已经消失，
+留着反而会掩盖常量值变更。
+
+单测总数 36，全绿。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.19 同步清理死字符串（第十六个落地片）
+
+上一片留下的 `values/strings.xml` 清理，这一片做掉。`617 → 593`，删 **24 条**；
+每条在 `values-ja` / `values-zh-rCN` / `values-zh-rHK` / `values-zh-rTW` **同步删**，
+共 120 行。不这么做会触发 lint 的 `ExtraTranslation`（翻译在、默认值不在），
+比留着更糟。
+
+**判定口径**：全仓（`AndroidManifest.xml`、`res/**/*.xml`、`.kt` / `.java` / `.gradle`）
+搜 `R.string.<name>` 与 `@string/<name>`，两个都不命中才算死。判死之前先排除两种
+「看不见的引用」：
+
+- 反射式 `resources.getIdentifier(...)`——全仓零命中；
+- `import com.hippo.ehviewer.R.string` 后直接用字段名——全仓零命中，全是
+  `import com.hippo.ehviewer.R` + `R.string.x` 的写法。
+
+**清单**（按来源分组）：
+
+- 跳页对话框被 Compose 重做：`go_to_gid`、`go_to_hint`（`go_to` / `go_to_last_page` 仍在用）
+- 快速搜索改版：`quick_search_tip`、`add_quick_search_dialog_title`、`delete_quick_search_message`
+- 下载升级路径：`download_upgrade_existed`、`download_upgrade_service_failed`
+- 画廊信息页请求头编辑：`header_key`、`header_value`
+- 富文本格式菜单：`format_bold`、`format_italic`、`format_strikethrough`、`format_underline`、`format_plain`
+- 其它：`readme`、`search_advance`、`copy_trans`、`torrents`、`rating0`、`no_history`、
+  `error_write_failed`、`error_invalid_number`、`kokomade_tip`、`information_webview_outdated`
+
+`rating0` 单独记一笔：`rating1`…`rating10` 由 `GalleryDetailScene` 的 `when` 逐值映射，
+`rating0` 没有对应分支，是真正的孤儿——这类「看着像数组之一」的条目最容易被
+批量清理时漏判，但也不能因为同族有人用就留着。
+
+**`arrays.xml` 未动**：36 个数组全部挂在设置页 Preference 的 `entries` / `entryValues`
+上，是活的。数组内的 `@string/x` 也计入了判定口径，所以数组引用的字符串不会被误删。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.20 清理死样式与死 styleable（第十七个落地片）
+
+字符串清完之后，把剩下的资源类型一次扫干净：**46 项、约 200 行**。
+`layout` 28 个全部还在用（Compose 页面仍包着 XML 的壳），死的是颜色、drawable、
+id、style、attr 这五类。
+
+**判定口径**：`@<type>/<name>` 与 `R.<type>.<name>`，正则尾巴必须加 `(?![\w.])`。
+不加的话搜 `@drawable/icon` 会命中 `@drawable/icon_dark`，死资源被前缀相同的邻居
+救活，结果是漏删而不是误删——但漏删会让「零引用」这个结论整个不可信。
+
+**口径必须补的三处，缺一就会误删**：
+
+1. **`tools:override="true"` 的 style 靠名字碰撞生效**。`themes_override.xml` 里那 5 个
+   （`Base.ThemeOverlay.AppCompat.ActionBar`、`...Dark.ActionBar`、
+   `Widget.MaterialComponents.CompoundButton.CheckBox` / `RadioButton`、
+   `PreferenceSummaryTextStyle`）**永远零引用**，但删了就是覆盖失效。判定 style 时必须
+   先跳过带 `tools:override` 的。
+2. **attr 的引用形式是 `R.styleable.<Styleable>_<attr>`**，不是 `R.attr.x`。只查后者时
+   报 38 个死 attr，补上 styleable 索引 + `app:x=` + `<item name="x">` 之后只剩 4 个，
+   再减去随死控件消失的 3 个，正好归零。
+3. **同名陷阱**：`<declare-styleable name="ProgressView">` 与 `<style name="ProgressView">`
+   是两个资源，6 个布局里 `style="@style/ProgressView"` 引的是后者。删 styleable 时
+   不能顺手把 style 删掉。
+
+**死控件留下的 styleable**：`ProgressView`、`DividerView`、`ActivityPreference` 三个
+`declare-styleable` 对应的类在仓库里已经不存在（`Indicating` 有活类
+`IndicatingListView`，别混），整块删除。
+
+**级联要跑三轮**：删 style 会让它引用的 dimen / drawable / color 变成孤儿。
+本片实际是 `46 → +5 → +1`：
+
+- 第一轮：`CategoryText` 死 → `@dimen/category_table_item_height`、
+  `@drawable/check_text_view_foreground` 死；
+- 第二轮：`check_text_view_foreground` 死 → `@color/check_text_view_mask` 死；
+- 第三轮：`CardView.Reactive` 死 → `CardView.Normal`（只用它当 parent）死；
+  `Widget.FloatingActionButton.Accent.Mini` 死 → `Widget.FloatingActionButton.Accent` 死。
+
+每轮删完都要重跑盘点，直到 `layout` / `drawable` / `color` / `bool` / `dimen` / `attr`
+的零引用计数全部归零。
+
+**口径的第四个坑，也是这一片最该记的一条：`R.style.<name>` 里的点号会变成下划线。**
+
+按 `@style/` + `parent=` + `R.style.<name>` 三种形式统计，`ThemeOverlay.Black`
+是零引用 —— `themes.xml` 里 27 行没人要，连它带的那十来个
+`content_black` / `widget_black` / `progress_black` / `tag_*_background_black` /
+`primary_drawable_black` / `secondary_drawable_black` / `divider_black` /
+`content_reactive_black` / `gallery_detail_button_background_black` 和
+`@drawable/divider_gallery_detail_dark` 都像是死的整条链。
+
+实际它是活的，只是写法是 `R.style.ThemeOverlay_Black`：
+
+```kotlin
+// EhActivity.getThemeStyleRes()
+if (Settings.blackDarkTheme && night) R.style.ThemeOverlay_Black else R.style.ThemeOverlay
+```
+
+纯黑（AMOLED）主题在 View 层就靠它 apply。**带点的 style 名必须先 `.`→`_` 再查
+`R.style.`**，否则所有带点的 style 都会被判死。这一片删掉的 7 个带点 style
+（`TextAppearance.CardTitle`、`TextAppearance.CardMessage`、`TextAppearance.CategoryTitle`、
+`CardView.Reactive`、`CardView.Normal`、`Widget.FloatingActionButton.Accent(.Mini)`）
+之所以没出事，是编译期兜住了——被删的 `R.style.X_Y` 会直接编译失败。
+
+但「编译能过」只证明**没删错**，不证明**该删的都删了**。漏判的死资源永远不会
+触发编译错误，所以口径必须补全，不能拿编译当兜底。
+
+**第五个坑：点号隐式继承。** `<style name="ThemeOverlay" />` 是空壳，但它被
+`ThemeOverlay.Black` 通过 Android 的命名继承自动当作 parent，判定时「存在子样式」
+必须算作活，否则父子一起被清掉。
+
+补完这两条后复核：19 个 style（含 `values-night`）、5 个 `tools:override`，
+零引用 **0** 个。资源层到此收敛。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.21 清理孤儿类（第十八个落地片）
+
+资源清完，轮到代码。**5 个类 + 1 个布局、269 行**。
+
+**方法**：对每个 Kotlin 顶层类型（`class` / `interface` / `object` / `typealias`）统计
+全仓词边界出现次数，只在声明那一行出现一次 → 孤儿。口径收敛了两轮，每轮都在修误报：
+
+- **只扫 `.kt`** 报出 31 个候选，其中 20 个是假的：Preference 子类由 `preference.xml`
+  里的全限定名实例化、`ShortcutsActivity` 由 `AndroidManifest` 引用、`BatteryView` /
+  `SeekBarPanel` / `TileThumb` 由布局的 `<com.hippo.xxx>` 标签引用。**必须把 XML /
+  Manifest / ProGuard 一起算进来。**
+- **只判「其它文件零出现」** 仍会误报：`ArchiveChannel` / `PfdArchiveChannel` /
+  `Zip4jSession`、`MutexTracker` / `MutexPool`、`TagGroup` / `TagGroups` 这些都在自己
+  文件里被用。**要把「本文件声明行之后是否再出现」也算进去。**
+
+两轮之后剩下的 5 个真孤儿：
+
+| 文件 | 行数 | 来历 |
+| --- | --- | --- |
+| `hippo/drawable/TriangleDrawable.kt` | 66 | 画三角的 `Drawable`，无调用方 |
+| `hippo/easyrecyclerview/MarginItemDecoration.kt` | 64 | 列表外边距装饰 |
+| `hippo/easyrecyclerview/SimpleHolder.kt` | 21 | 空壳 `RecyclerView.ViewHolder` |
+| `hippo/ehviewer/ui/dialog/SelectItemWithIconAdapter.kt` | 54 | 带图标的选择对话框 adapter |
+| `hippo/ehviewer/widget/ResizeableFixedThumb.kt` | 31 | 按 `Settings.listThumbSize` 定尺寸的缩略图控件 |
+
+最后一个值得单说：它是「列表缩略图固定 2:3」的实现，列表页 Compose 化之后尺寸由
+`Modifier.aspectRatio` 接管，控件留在仓库里没人 `new` 也没人写进布局，是出壳的直接产物。
+
+**级联**：`SelectItemWithIconAdapter` 是 `dialog_item_select_with_icon.xml` 的唯一引用者，
+布局一并删除——注意 layout 的零引用判定必须扫 `R.layout.x` 与 `@layout/x` 两种，
+只看布局互相引用会漏掉这种「只被代码 inflate」的情况。
+
+复查：513 个 `.kt` 文件，孤儿归零。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。
+
+### 10.22 清理顶层孤儿声明（第十九个落地片）
+
+类型清完，扫顶层 `fun` / `val`。**8 处**：
+
+- `SDKUtils`：`isAtLeastOMR1`、`isAtLeastR`、`isAtLeastU`、`isAtLeastSExtension7`
+- `CoroutinesExtensions`：`launchNow`（`GlobalScope` + `UNDISPATCHED` 的旧入口）、
+  `withNonCancellableContext`
+- `ParcelableCompat`：`getSparseParcelableArrayCompat`（连带 `android.util.SparseArray` import）
+- `FavoritesScreen`：`CARD_THUMB_HEIGHT`
+
+**口径**：只认行首（列 0）的声明——类/接口成员天然有缩进，`^fun` / `^val` 就能把顶层
+挑出来。再要求 `\bname\b` 全仓计数 **恰好等于 1**（只有声明处）。重载会让计数 >1，
+自动跳过：宁可漏，不误删。
+
+**级联又出现一次**：`isAtLeastSExtension7` 的定义是 `isAtLeastR && ...`，删掉它之后
+`isAtLeastR` 才失去唯一引用。所以「删完复查」不是形式主义，是必须的第二步。
+
+**两处零引用必须留下**：
+
+1. **`ReaderScreen`**（`ui/reader/ReaderScreen.kt`）—— 全仓零调用，但它不是死代码，
+   是**已经写好、还没接线**的 Compose 阅读器。孤儿扫描分不清「死」和「未接线」，
+   这种只能靠人看：文件头注释写着「不再需要自绘 GL 与 nativeTexImage 那套 512×512
+   纹理上传」，明显是给下一步准备的。
+2. **`ehHost()`**（`ui/host/EhHostState.kt`）—— 零调用，但它是 `ehHostOrNoOp()` 的
+   非降级版本（后者返回空实现兜底），属于宿主能力 API 面，不是遗留代码。
+
+**顺带撞见一个比清理更重要的事实：阅读器其实还没出壳。**
+
+历史页的「阅读」仍然开 Activity：
+
+```kotlin
+// HistoryScene.openReader()
+context.startActivity(
+    Intent(context, GalleryActivity::class.java).apply {
+        action = GalleryActivity.ACTION_EH
+        putExtra(GalleryActivity.KEY_GALLERY_INFO, gi)
+    },
+)
+```
+
+`GalleryActivity` 是 1300+ 行的旧实现（`R.layout.activity_gallery` + `GLRootView` +
+`GalleryView`，自绘 GL 渲染），而 `ui/reader` 里的 `ReaderScreen` + `PageSource`
+已经按新方案写完。也就是说 **P7-c 还有阅读器这一页没出壳**，10.15 里「P7-c 收尾」
+的说法不准确。
+
+本片只做清理、不动功能，这条留给下一片：把 `GalleryActivity` 换成
+`EhRoute.Reader` + `ReaderScreen`，历史/详情两个入口一起改线。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。

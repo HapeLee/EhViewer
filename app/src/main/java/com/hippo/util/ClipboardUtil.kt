@@ -27,7 +27,7 @@ import android.view.textclassifier.TextClassifier
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.SettingsActivity
-import com.hippo.ehviewer.ui.scene.BaseScene
+import com.hippo.ehviewer.ui.host.TIP_LENGTH_SHORT
 
 fun Context.getClipboardManager(): ClipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -44,9 +44,9 @@ fun Context.addTextToClipboard(text: CharSequence?, isSensitive: Boolean) {
         )
     }
     if (this is MainActivity) {
-        showTip(R.string.copied_to_clipboard, BaseScene.LENGTH_SHORT)
+        showTip(R.string.copied_to_clipboard, TIP_LENGTH_SHORT)
     } else if (this is SettingsActivity) {
-        showTip(R.string.copied_to_clipboard, BaseScene.LENGTH_SHORT)
+        showTip(R.string.copied_to_clipboard, TIP_LENGTH_SHORT)
     }
 }
 
@@ -57,7 +57,7 @@ fun ClipboardManager.getTextFromClipboard(context: Context): String? {
 }
 
 fun ClipboardManager.getUrlFromClipboard(context: Context): String? {
-    if (isAtLeastS && primaryClipDescription?.classificationStatus == ClipDescription.CLASSIFICATION_COMPLETE) {
+    if (primaryClipDescription?.classificationStatus == ClipDescription.CLASSIFICATION_COMPLETE) {
         if ((
                 primaryClipDescription?.getConfidenceScore(TextClassifier.TYPE_URL)
                     ?.let { it <= 0 }

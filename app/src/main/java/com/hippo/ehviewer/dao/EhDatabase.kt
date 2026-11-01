@@ -21,10 +21,12 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [BookmarkInfo::class, DownloadInfo::class, DownloadLabel::class, DownloadDirname::class, Filter::class, HistoryInfo::class, LocalFavoriteInfo::class, QuickSearch::class],
-    version = 4,
+    entities = [BookmarkInfo::class, DownloadInfo::class, DownloadLabel::class, DownloadDirname::class, Filter::class, HistoryInfo::class, LocalFavoriteInfo::class, QuickSearch::class, ReadingProgress::class],
+    version = 5,
     exportSchema = true,
 )
 abstract class EhDatabase : RoomDatabase() {
@@ -36,11 +38,29 @@ abstract class EhDatabase : RoomDatabase() {
     abstract fun historyDao(): HistoryDao
     abstract fun localFavoritesDao(): LocalFavoritesDao
     abstract fun quickSearchDao(): QuickSearchDao
+    abstract fun readingProgressDao(): ReadingProgressDao
+}
+
+/**
+ * 4 → 5：只加一张 [ReadingProgress] 表。
+ *
+ * 建库时挂了 `fallbackToDestructiveMigration`，缺迁移就会整库重建（历史、下载全丢）。
+ * 所以每次动 schema 都必须显式补一条迁移，别指望那个兜底。
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `READING_PROGRESS` " +
+                "(`GID` INTEGER NOT NULL, `PAGE` INTEGER NOT NULL, `TIME` INTEGER NOT NULL, PRIMARY KEY(`GID`))",
+        )
+    }
 }
 
 fun buildMainDB(context: Context): EhDatabase {
-    // TODO: Remove allowMainThreadQueries
-    return Room.databaseBuilder(context, EhDatabase::class.java, "eh.db").allowMainThreadQueries()
+    // 不开 allowMainThreadQueries：所有 DAO 只经 EhDB 出去，而 EhDB 的调用点（P6-a / P6-c）
+    // 已经全部搬到 IO 线程/协程里了。Room 会在主线程访问时直接抛异常，别再把它开回去
+    return Room.databaseBuilder(context, EhDatabase::class.java, "eh.db")
+        .addMigrations(MIGRATION_4_5)
         // 按“新项目”口径处理：不背历史迁移链，schema 变动时整库重建
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()

@@ -21,8 +21,11 @@ import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 
 @Dao
 interface HistoryDao : BasicDao<HistoryInfo> {
@@ -43,6 +46,23 @@ interface HistoryDao : BasicDao<HistoryInfo> {
 
     @Insert
     override fun insert(t: HistoryInfo): Long
+
+    /** 按主键 GID 做「存在即更新、不存在即插入」，语句本身是原子的 */
+    @Upsert
+    fun upsert(t: HistoryInfo)
+
+    /** 已经存在就保留旧记录；冲突判断交给 SQLite，避免「先查再插」的竞态 */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insertOrIgnore(t: List<HistoryInfo>)
+
+    /** 改收藏槽位需要「读出来改一个字段再写回」，整个在一个事务里完成 */
+    @Transaction
+    fun updateFavoriteSlot(gid: Long, slot: Int) {
+        load(gid)?.let { info ->
+            info.favoriteSlot = slot
+            update(info)
+        }
+    }
 
     @Delete
     fun delete(historyInfo: HistoryInfo)

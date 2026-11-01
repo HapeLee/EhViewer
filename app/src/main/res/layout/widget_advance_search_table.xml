@@ -24,7 +24,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginRight="@dimen/advance_search_table_item_margin"
+            android:layout_marginEnd="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:minWidth="0dp"
             android:minHeight="0dp"
@@ -34,7 +34,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginLeft="@dimen/advance_search_table_item_margin"
+            android:layout_marginStart="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:minWidth="0dp"
             android:minHeight="0dp"
@@ -50,7 +50,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginRight="@dimen/advance_search_table_item_margin"
+            android:layout_marginEnd="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:minWidth="0dp"
             android:minHeight="0dp"
@@ -60,7 +60,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginLeft="@dimen/advance_search_table_item_margin"
+            android:layout_marginStart="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:entries="@array/search_min_rating" />
     </LinearLayout>
@@ -74,13 +74,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginRight="@dimen/advance_search_table_item_margin"
+            android:layout_marginEnd="@dimen/advance_search_table_item_margin"
+            android:labelFor="@id/from_sp"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:text="@string/search_sp" />
 
         <EditText
             style="@style/FixedLineHeightEditText"
+            android:id="@+id/from_sp"
             android:layout_width="64dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
@@ -95,11 +97,13 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
             android:layout_marginHorizontal="@dimen/advance_search_table_item_margin"
+            android:labelFor="@id/to_sp"
             android:text="@string/search_sp_to"
             android:textColor="?android:attr/textColorPrimary" />
 
         <EditText
             style="@style/FixedLineHeightEditText"
+            android:id="@+id/to_sp"
             android:layout_width="64dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
@@ -113,7 +117,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginLeft="@dimen/advance_search_table_item_margin"
+            android:layout_marginStart="@dimen/advance_search_table_item_margin"
             android:text="@string/search_sp_suffix"
             android:textColor="?android:attr/textColorPrimary" />
     </LinearLayout>
@@ -140,7 +144,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginRight="@dimen/advance_search_table_item_margin"
+            android:layout_marginEnd="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:minWidth="0dp"
             android:minHeight="0dp"
@@ -160,7 +164,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginLeft="@dimen/advance_search_table_item_margin"
+            android:layout_marginStart="@dimen/advance_search_table_item_margin"
             android:layout_weight="1"
             android:minWidth="0dp"
             android:minHeight="0dp"

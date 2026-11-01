@@ -256,7 +256,7 @@ data class ListUrlBuilder(
             }
             // Search key
             mKeyword?.run {
-                val keyword = trim { it <= ' ' }
+                val keyword = trim()
                 if (keyword.isNotEmpty()) {
                     ub.addQuery("f_search", encodeUTF8(this))
                 }

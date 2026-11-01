@@ -60,12 +60,6 @@
         <attr name="galleryDetailDivider" format="reference" />
     </declare-styleable>
 
-    <declare-styleable name="ProgressView">
-        <attr name="color" />
-        <attr name="indeterminate" format="boolean" />
-        <attr name="progress" format="float" />
-    </declare-styleable>
-
     <declare-styleable name="MaxSizeContainer">
         <attr name="maxWidth" format="dimension" />
         <attr name="maxHeight" format="dimension" />
@@ -83,22 +77,10 @@
         </attr>
     </declare-styleable>
 
-    <declare-styleable name="FixedThumb">
-        <attr name="minAspect" format="float" />
-        <attr name="maxAspect" format="float" />
-        <attr name="alwaysCutAndScale" format="boolean"/>
-    </declare-styleable>
-
     <declare-styleable name="CheckTextView">
         <attr name="android:foregroundGravity" />
         <attr name="android:foreground" />
         <attr name="foregroundInsidePadding" format="boolean" />
-    </declare-styleable>
-
-    <declare-styleable name="DividerView">
-        <attr name="dividerWidth" format="dimension" />
-        <attr name="dividerHeight" format="dimension" />
-        <attr name="dividerColor" />
     </declare-styleable>
 
     <declare-styleable name="AutoWrapLayout">
@@ -107,11 +89,6 @@
             <enum name="center" value="1" />
             <enum name="bottom" value="2" />
         </attr>
-    </declare-styleable>
-
-    <declare-styleable name="SimpleGridLayout">
-        <attr name="columnCount" format="integer" />
-        <attr name="itemMargin" format="dimension" />
     </declare-styleable>
 
     <declare-styleable name="Slider">
@@ -136,14 +113,6 @@
         <attr name="indicatorColor" format="color" />
     </declare-styleable>
 
-    <declare-styleable name="DialogPreference">
-        <attr name="dialogTitle" format="string" />
-        <attr name="dialogIcon" format="reference" />
-        <attr name="positiveButtonText" format="string" />
-        <attr name="negativeButtonText" format="string" />
-        <attr name="dialogLayout" format="reference" />
-    </declare-styleable>
-
     <declare-styleable name="ListPreference">
         <!-- The human-readable array to present as a list. Each entry must have a corresponding
              index in entryValues. -->
@@ -152,14 +121,6 @@
              entries is selected. If a user clicks on the second item in entries, the
              second item in this array will be saved to the preference. -->
         <attr name="entryValues" format="reference" />
-    </declare-styleable>
-
-    <declare-styleable name="ActivityPreference">
-        <attr name="activity" format="string" />
-    </declare-styleable>
-
-    <declare-styleable name="UrlPreference">
-        <attr name="url" format="string" />
     </declare-styleable>
 
     <declare-styleable name="FastScroller">

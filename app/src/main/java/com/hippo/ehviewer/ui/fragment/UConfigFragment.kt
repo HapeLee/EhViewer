@@ -35,7 +35,7 @@ import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhCookieStore
 import com.hippo.ehviewer.client.EhUrl
-import com.hippo.ehviewer.ui.scene.BaseScene
+import com.hippo.ehviewer.ui.host.TIP_LENGTH_LONG
 import com.hippo.ehviewer.util.addQuicHints
 import com.hippo.ehviewer.util.setDefaultSettings
 import com.hippo.ehviewer.widget.DialogWebChromeClient
@@ -73,7 +73,7 @@ class UConfigFragment : BaseFragment() {
         progress!!.visibility = View.VISIBLE
         addQuicHints(url)
         webView!!.loadUrl(url)
-        showTip(R.string.apply_tip, BaseScene.LENGTH_LONG)
+        showTip(R.string.apply_tip, TIP_LENGTH_LONG)
         requireActivity().addMenuProvider(
             object : MenuProvider {
                 override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {

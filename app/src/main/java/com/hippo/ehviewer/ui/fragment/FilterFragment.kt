@@ -34,6 +34,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.view.MenuProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -46,6 +47,8 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhFilter
 import com.hippo.ehviewer.dao.Filter
+import com.hippo.util.launchIO
+import com.hippo.util.withUIContext
 import com.hippo.view.ViewTransition
 import com.hippo.yorozuya.LayoutUtils
 import com.hippo.yorozuya.ViewUtils
@@ -155,9 +158,14 @@ class FilterFragment : BaseFragment() {
                 if (DialogInterface.BUTTON_POSITIVE != which) {
                     return@setPositiveButton
                 }
-                mFilterList.delete(filter)
-                mAdapter.notifyDataSetChanged()
-                updateView(true)
+                // Room 不能在 UI 线程跑（P6-a），EhFilter 的写操作走 IO
+                lifecycleScope.launchIO {
+                    mFilterList.delete(filter)
+                    withUIContext {
+                        mAdapter.notifyDataSetChanged()
+                        updateView(true)
+                    }
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -184,7 +192,7 @@ class FilterFragment : BaseFragment() {
 
         @SuppressLint("NotifyDataSetChanged")
         override fun onClick(v: View) {
-            val text = mEditText.text.toString().trim { it <= ' ' }
+            val text = mEditText.text.toString().trim()
             if (TextUtils.isEmpty(text)) {
                 mInputLayout.error = getString(R.string.text_is_empty)
                 return
@@ -195,15 +203,20 @@ class FilterFragment : BaseFragment() {
             val filter = Filter()
             filter.mode = mode
             filter.text = text
-            if (!mFilterList.add(filter)) {
-                mInputLayout.error = getString(R.string.label_text_exist)
-                return
-            } else {
-                mInputLayout.error = null
+            lifecycleScope.launchIO {
+                val added = mFilterList.add(filter)
+                withUIContext {
+                    if (!added) {
+                        mInputLayout.error = getString(R.string.label_text_exist)
+                        return@withUIContext
+                    } else {
+                        mInputLayout.error = null
+                    }
+                    mAdapter.notifyDataSetChanged()
+                    updateView(true)
+                    mDialog.dismiss()
+                }
             }
-            mAdapter.notifyDataSetChanged()
-            updateView(true)
-            mDialog.dismiss()
         }
     }
 
@@ -231,10 +244,12 @@ class FilterFragment : BaseFragment() {
                 holder.checkbox?.text = if (Settings.showTagTranslations) EhFilter.applyTranslation(filter) else filter.text
                 holder.checkbox?.isChecked = filter.enable!!
                 holder.itemView.setOnClickListener {
-                    mFilterList.trigger(filter)
-
-                    // for updating delete line on filter text
-                    mAdapter.notifyItemChanged(position)
+                    // Room 不能在 UI 线程跑（P6-a）
+                    lifecycleScope.launchIO {
+                        mFilterList.trigger(filter)
+                        // for updating delete line on filter text
+                        withUIContext { mAdapter.notifyItemChanged(position) }
+                    }
                 }
                 holder.delete?.setOnClickListener { showDeleteFilterDialog(filter) }
             }

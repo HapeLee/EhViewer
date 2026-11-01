@@ -21,6 +21,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 
 @Dao
@@ -33,6 +34,18 @@ interface FilterDao : BasicDao<Filter> {
 
     @Insert
     override fun insert(t: Filter): Long
+
+    /**
+     * 过滤器的「唯一」是业务上的（TEXT + MODE），不是主键，所以只能靠事务把
+     * 「先查后插」包起来；插入成功返回 true，已存在返回 false。
+     */
+    @Transaction
+    fun insertIfAbsent(text: String, mode: Int, filter: Filter): Boolean {
+        if (load(text, mode) != null) return false
+        filter.id = null
+        filter.id = insert(filter)
+        return true
+    }
 
     @Delete
     fun delete(filter: Filter)

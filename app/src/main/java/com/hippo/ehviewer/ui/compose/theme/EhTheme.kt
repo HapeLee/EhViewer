@@ -16,6 +16,7 @@
 package com.hippo.ehviewer.ui.compose.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -40,13 +41,24 @@ import com.hippo.ehviewer.Settings
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EhTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
     // SharedPreferences 读取不放进组合阶段反复执行
     val isAmoled = remember { isDark && Settings.blackDarkTheme }
-    val colorScheme = remember(context, isDark, isAmoled) {
-        val base = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        if (isAmoled) {
+    MaterialExpressiveTheme(colorScheme = ehColorScheme(isDark, isAmoled), content = content)
+}
+
+/**
+ * 按「明暗 + 纯黑」算一套色板。
+ *
+ * 单独抽出来是为了让阅读器的 `read_theme` 覆盖（它要把明暗钉死成深/浅）复用同一套
+ * 取色逻辑，而不是抄一份会漂移的副本。
+ */
+@Composable
+fun ehColorScheme(dark: Boolean, amoled: Boolean): ColorScheme {
+    val context = LocalContext.current
+    return remember(context, dark, amoled) {
+        val base = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        if (amoled) {
             base.copy(
                 background = Color.Black,
                 surface = Color.Black,
@@ -60,5 +72,4 @@ fun EhTheme(content: @Composable () -> Unit) {
             base
         }
     }
-    MaterialExpressiveTheme(colorScheme = colorScheme, content = content)
 }

@@ -64,17 +64,13 @@
     <!-- Gallery Activity -->
     <string name="archive_need_passwd">归档文件需要密码</string>
     <string name="archive_passwd">请输入密码</string>
-    <string name="passwd_cannot_be_empty">密码不能为空</string>
-    <string name="passwd_wrong">密码错误</string>
     <string name="page_menu_title">第 %d 页</string>
     <string name="page_menu_refresh">@string/refresh</string>
     <string name="page_menu_share">@string/share</string>
     <string name="page_menu_save">保存</string>
     <string name="page_menu_save_to">保存到…</string>
     <string name="page_menu_download_original">下载原图</string>
-    <string name="gallery_menu_title">菜单</string>
     <string name="share_image">分享图片</string>
-    <string name="start_download_original">开始下载原图，请稍候…</string>
     <string name="image_saved">图片已保存至 %s</string>
 
     <!-- Navigation Bar -->
@@ -123,15 +119,10 @@
     <string name="remove_from_favorite_failure">移除收藏失败</string>
     <!-- Gallery List Fab Action -->
     <string name="go_to">跳页</string>
-    <string name="go_to_gid">GID，留空跳转末页</string>
-    <string name="go_to_hint">第 %1$d 页，共 %2$d 页</string>
     <string name="go_to_last_page">末页</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">快速搜索</string>
-    <string name="quick_search_tip">点击“+”来添加快速搜索</string>
-    <string name="readme">读我</string>
     <string name="add_quick_search_tip">画廊列表的状态将被保存为快速搜索。如果您希望保存搜索面板的状态，请先执行搜索。</string>
-    <string name="add_quick_search_dialog_title">添加快速搜索</string>
     <string name="save_progress">同时保存阅读进度</string>
     <string name="name_is_empty">名称为空</string>
     <string name="duplicate_name">已存在相同名称</string>
@@ -139,7 +130,6 @@
     <string name="duplicate_quick_search">已存在相同的快速搜索，名称为“%s”。</string>
     <string name="delete">删除</string>
     <string name="delete_quick_search_title">删除快速搜索</string>
-    <string name="delete_quick_search_message">删除“%s”？</string>
 
     <!-- Gallery Search -->
     <string name="search_normal">普通搜索</string>
@@ -149,7 +139,6 @@
     <string name="search_specify_tag">指定标签</string>
     <string name="search_tip">一般搜索：就是搜索。\n\n订阅搜素：在订阅中搜索。\n\n指定上传者：列出该上传者上传的画廊。其他选项会被忽略。\n\n指定标签：列出含有该标签的画廊。其他选项会被忽略。</string>
     <string name="search_enable_advance">启用高级选项</string>
-    <string name="search_advance">高级选项</string>
     <string name="search_sh">仅显示被删除的画廊</string>
     <string name="search_sto">仅显示有种子的画廊</string>
     <string name="search_sr">最低评分：</string>
@@ -186,8 +175,6 @@
 
     <!-- Gallery Detail Scene -->
     <string name="download_upgradeable">可升级</string>
-    <string name="download_upgrade_existed">目标画廊已存在，请删除后重试</string>
-    <string name="download_upgrade_service_failed">由于系统限制，无法从后台启动下载服务，请点击确定开始下载</string>
     <string name="read_from">从第 %d 页阅读</string>
     <plurals name="page_count">
         <item quantity="other">%d 页</item>
@@ -218,7 +205,6 @@
     <string name="open_in_other_app">在其他应用中打开</string>
     <string name="filter_the_uploader">屏蔽上传者“%s”？</string>
     <string name="filter_added">已添加屏蔽项</string>
-    <string name="copy_trans">复制翻译</string>
     <string name="show_definition">查看定义</string>
     <string name="filter_the_tag">屏蔽标签“%s”？</string>
     <string name="tag_vote_up">是的，这很正确</string>
@@ -229,8 +215,6 @@
     <string name="vote_failed">投票失败</string>
     <!-- Gallery Info -->
     <string name="gallery_info">画廊信息</string>
-    <string name="header_key">键</string>
-    <string name="header_value">值</string>
     <string name="key_url">链接</string>
     <string name="key_title">标题</string>
     <string name="key_title_jpn">日文标题</string>
@@ -252,7 +236,6 @@
     <string name="key_torrent_url">种子</string>
     <string name="copied_to_clipboard">已复制到剪切板</string>
     <!-- Gallery Torrents -->
-    <string name="torrents">种子</string>
     <string name="no_torrents">没有种子</string>
     <string name="download_torrent_started">开始下载种子</string>
     <string name="download_torrent_failure">无法下载种子</string>
@@ -280,7 +263,6 @@
     <string name="rating3">糟糕</string>
     <string name="rating2">瞎眼</string>
     <string name="rating1">快要窒息了</string>
-    <string name="rating0">…</string>
     <!-- Gallery Comments -->
     <string name="gallery_comments">画廊评论</string>
     <string name="no_one_comments_gallery">暂时没有评论</string>
@@ -304,12 +286,7 @@
     <string name="vote_down_successfully">已钦定为垃圾评论</string>
     <string name="cancel_vote_down_successfully">已不再钦定为垃圾评论</string>
     <string name="check_vote_status">查看投票情况</string>
-    <string name="format_bold"><b>加粗</b></string>
-    <string name="format_italic"><i>倾斜</i></string>
-    <string name="format_strikethrough"><strike>删除线</strike></string>
-    <string name="format_underline"><u>下划线</u></string>
     <string name="format_url">链接</string>
-    <string name="format_plain">纯文本</string>
     <!-- Gallery Previews -->
     <string name="gallery_previews">画廊预览</string>
 
@@ -329,7 +306,6 @@
     <string name="move_favorites_dialog_title">移动收藏</string>
 
     <!-- History Scene -->
-    <string name="no_history">这里是阅读历史</string>
     <string name="clear_all">全部清除</string>
     <string name="clear_all_history">清除所有阅读历史？</string>
 
@@ -419,6 +395,10 @@
     <string name="settings_eh_my_tags">我的标签</string>
     <string name="settings_eh_my_tags_summary">E-Hentai 网站上的我的标签</string>
     <string name="settings_eh_black_dark_theme">纯黑深色主题</string>
+    <string name="dark_theme">主题</string>
+    <string name="dark_theme_follow_system">跟随系统</string>
+    <string name="dark_theme_off">关闭</string>
+    <string name="dark_theme_on">开启</string>
     <string name="settings_eh_launch_page">启动页</string>
     <string name="settings_eh_list_mode">列表模式</string>
     <string name="settings_eh_list_mode_detail">详情</string>
@@ -473,9 +453,6 @@
     <string name="settings_read_theme_dark">暗色</string>
     <string name="settings_read_theme_light">亮色</string>
     <string name="settings_read_keep_screen_on">屏幕常亮</string>
-    <string name="settings_read_show_clock">显示时钟</string>
-    <string name="settings_read_show_progress">显示进度</string>
-    <string name="settings_read_show_battery">显示电量</string>
     <string name="settings_read_show_page_interval">显示页面间隔</string>
     <string name="settings_read_turn_page_interval">自动翻页间隔（秒）</string>
     <string name="settings_read_volume_page">使用音量键翻页</string>
@@ -505,7 +482,6 @@
     <string name="settings_download_download_origin_image_never">从不启用</string>
     <string name="settings_download_download_origin_image_force">总是启用</string>
     <string name="settings_download_download_origin_image_only">仅下载时启用</string>
-    <string name="settings_download_task_confirm">确定要执行操作？</string>
     <string name="settings_download_restore_download_items">恢复下载项</string>
     <string name="settings_download_restore_download_items_summary">恢复下载目录里的所有下载项</string>
     <string name="settings_download_restore_not_found">未找到可恢复下载项</string>
@@ -605,24 +581,19 @@
     <string name="error_cant_find_activity">找不到相应的应用</string>
     <string name="error_cannot_parse_the_url">无法解析链接</string>
     <string name="error_decoding_failed">解码失败</string>
-    <string name="error_empty">空</string>
     <string name="error_reading_failed">读取失败</string>
     <string name="error_out_of_range">越界</string>
-    <string name="error_write_failed">写入失败</string>
     <string name="error_parse_error">解析失败</string>
     <string name="error_invalid_url">无效链接</string>
     <string name="error_get_ptoken_error">获取 pToken 错误</string>
     <string name="error_cant_create_temp_file">无法创建临时文件</string>
     <string name="error_cant_save_image">无法保存图片</string>
-    <string name="error_invalid_number">非法数字</string>
     <string name="error_please_login_first">请先登录</string>
     <string name="error_cannot_find_gallery">找不到画廊</string>
     <string name="error_something_wrong_happened">被玩坏了</string>
-    <string name="kokomade_tip">设置-&gt;Eh-&gt;画廊站点-&gt;E-Hentai</string>
     <string name="no_browser_installed">请安装一个浏览器。</string>
     <string name="cloudflare_bypass_failed">未能绕过 Cloudflare 验证</string>
     <string name="open_in_webview">在 WebView 中打开链接以通过验证？</string>
-    <string name="information_webview_outdated">请更新 WebView 应用提高兼容性</string>
 
     <!-- Readable Time -->
     <string name="from_the_future">来自未来</string>
@@ -650,4 +621,5 @@
     <plurals name="year">
         <item quantity="other">年</item>
     </plurals>
+    <string name="night_mode">夜间模式</string>
 </resources>

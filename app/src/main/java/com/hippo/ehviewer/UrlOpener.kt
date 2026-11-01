@@ -26,15 +26,26 @@ import androidx.core.net.toUri
 import com.hippo.ehviewer.client.EhUrlOpener.parseUrl
 import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
-import com.hippo.ehviewer.ui.GalleryActivity
 import com.hippo.ehviewer.ui.MainActivity
-import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
-import com.hippo.ehviewer.ui.compose.nav.compatSceneClassNameOf
-import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
+import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.encodeRoute
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import rikka.core.res.resolveColor
 
 object UrlOpener {
+    /** 阅读器也在 NavHost 里了，URL 命中「本画廊第几页」时压它的 route，不再起 Activity */
+    private fun openReader(context: Context, gid: Long, token: String?, page: Int) {
+        startHostWithRoute(context, EhRoute.Reader(gid = gid, token = token, page = page))
+    }
+
+    private fun startHostWithRoute(context: Context, route: EhRoute) {
+        val intent = Intent(context, MainActivity::class.java)
+        intent.action = EhNavHostActivity.ACTION_START_SCENE
+        intent.putExtra(EhNavHostActivity.KEY_SCENE_ROUTE, encodeRoute(route))
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        context.startActivity(intent)
+    }
+
     fun openUrl(
         context: Context,
         url: String?,
@@ -44,40 +55,27 @@ object UrlOpener {
         if (url.isNullOrEmpty()) {
             return
         }
-        var intent: Intent
         val uri = url.toUri()
         if (ehUrl) {
             galleryDetail?.let {
                 val result = GalleryPageUrlParser.parse(url)
                 if (result != null) {
                     if (result.gid == it.gid) {
-                        intent = Intent(context, GalleryActivity::class.java)
-                        intent.action = GalleryActivity.ACTION_EH
-                        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, it)
-                        intent.putExtra(GalleryActivity.KEY_PAGE, result.page)
-                        context.startActivity(intent)
+                        openReader(context, it.gid, it.token, result.page)
                         return
                     }
                 } else if (url.startsWith("#c")) {
                     try {
-                        intent = Intent(context, GalleryActivity::class.java)
-                        intent.action = GalleryActivity.ACTION_EH
-                        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, it)
-                        intent.putExtra(GalleryActivity.KEY_PAGE, url.replace("#c", "").toInt() - 1)
-                        context.startActivity(intent)
+                        openReader(context, it.gid, it.token, url.replace("#c", "").toInt() - 1)
                         return
                     } catch (_: NumberFormatException) {
                     }
                 }
             }
             parseUrl(url)?.let { route ->
-                intent = Intent(context, MainActivity::class.java)
-                val className = compatSceneClassNameOf(route) ?: return
-                intent.action = EhNavHostActivity.ACTION_START_SCENE
-                intent.putExtra(EhNavHostActivity.KEY_SCENE_NAME, className)
-                intent.putExtra(EhNavHostActivity.KEY_SCENE_ARGS, route.toLegacyArgs(cachedGalleryDetail(route)))
-                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                context.startActivity(intent)
+                // 这里拿不到宿主的返回栈（context 可能是别的 Activity），
+                // 所以把 route 本身塞进 Intent，宿主解码后压栈
+                startHostWithRoute(context, route)
                 return
             }
         }

@@ -31,136 +31,91 @@ import com.hippo.ehviewer.dao.Filter
 import com.hippo.ehviewer.dao.HistoryInfo
 import com.hippo.ehviewer.dao.LocalFavoriteInfo
 import com.hippo.ehviewer.dao.QuickSearch
+import com.hippo.ehviewer.dao.ReadingProgress
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.unifile.UniFile
 import com.hippo.util.sendTo
 
+/**
+ * Room 的对外门面。
+ *
+ * 线程约束：这里的每个方法都会碰 Room，必须在 IO 线程调用。P6-d 已经摘掉
+ * `allowMainThreadQueries`，主线程访问会直接抛 `IllegalStateException`，不再只靠约定。
+ *
+ * 并发约束：过去靠 `@Synchronized` 把整个 EhDB 串行化，顺带保护「查一次 / 读一批 →
+ * 改 → 写回」这类复合操作。现在把这些语义下沉到 DAO：
+ * - 单行的 `@Upsert` / `@Insert(onConflict = IGNORE)` 由语句自身保证原子；
+ * - 复合操作（下载标签与快速搜索重排、过滤器去重插入、收藏槽位更新）由 DAO 上标注
+ *   `@Transaction` 的方法保证。
+ * 进程内串行本身不再需要，Room 会自己处理 SQLite 的写锁。
+ */
 object EhDB {
     private val TAG = EhDB::class.java.simpleName
     private val db = ehDatabase
 
-    // Fix state
-    @get:Synchronized
+    /**
+     * 注意：这里**不再**把 `STATE_WAIT` / `STATE_DOWNLOAD` 抹成 `STATE_NONE`。
+     * 那两态就是持久队列（P6-f）：进程被杀时它们留在库里，下次起来由
+     * `DownloadManager.restorePendingDownloads()` 重新排队。
+     */
     val allDownloadInfo: List<DownloadInfo>
-        get() = db.downloadsDao().list().onEach {
-            if (it.state == DownloadInfo.STATE_WAIT || it.state == DownloadInfo.STATE_DOWNLOAD) {
-                it.state = DownloadInfo.STATE_NONE
-            }
-        }
+        get() = db.downloadsDao().list()
 
-    @Synchronized
     fun updateDownloadInfo(downloadInfos: List<DownloadInfo>) {
-        val dao = db.downloadsDao()
-        dao.update(downloadInfos)
+        db.downloadsDao().update(downloadInfos)
     }
 
-    @Synchronized
     fun putDownloadInfo(downloadInfo: DownloadInfo) {
-        db.downloadsDao().run {
-            if (load(downloadInfo.gid) != null) {
-                update(downloadInfo)
-            } else {
-                insert(downloadInfo)
-            }
-        }
+        db.downloadsDao().upsert(downloadInfo)
     }
 
-    @Synchronized
     fun removeDownloadInfo(downloadInfo: DownloadInfo) {
         db.downloadsDao().delete(downloadInfo)
     }
 
-    @get:Synchronized
     val allDownloadDirname: List<DownloadDirname>
         get() = db.downloadDirnameDao().list()
 
-    @Synchronized
-    fun getDownloadDirname(gid: Long): String? {
-        val dao = db.downloadDirnameDao()
-        val raw = dao.load(gid)
-        return raw?.dirname
-    }
+    fun getDownloadDirname(gid: Long): String? = db.downloadDirnameDao().load(gid)?.dirname
 
-    @Synchronized
     fun putDownloadDirname(gid: Long, dirname: String?) {
-        val dao = db.downloadDirnameDao()
-        var raw = dao.load(gid)
-        if (raw != null) {
-            raw.dirname = dirname
-            dao.update(raw)
-        } else {
-            raw = DownloadDirname(gid, dirname)
-            dao.insert(raw)
-        }
+        db.downloadDirnameDao().upsert(DownloadDirname(gid, dirname))
     }
 
-    @Synchronized
     fun removeDownloadDirname(gid: Long) {
-        val dao = db.downloadDirnameDao()
-        dao.deleteByKey(gid)
+        db.downloadDirnameDao().deleteByKey(gid)
     }
 
-    @get:Synchronized
     val allDownloadLabelList: List<DownloadLabel>
         get() = db.downloadLabelDao().list()
 
-    @Synchronized
     fun addDownloadLabel(label: String): DownloadLabel {
-        val dao = db.downloadLabelDao()
         val raw = DownloadLabel()
         raw.label = label
         raw.time = System.currentTimeMillis()
-        raw.id = dao.insert(raw)
+        raw.id = db.downloadLabelDao().insert(raw)
         return raw
     }
 
-    @Synchronized
     fun addDownloadLabel(raw: DownloadLabel): DownloadLabel {
         // Reset id
         raw.id = null
-        val dao = db.downloadLabelDao()
-        raw.id = dao.insert(raw)
+        raw.id = db.downloadLabelDao().insert(raw)
         return raw
     }
 
-    @Synchronized
     fun updateDownloadLabel(raw: DownloadLabel?) {
-        val dao = db.downloadLabelDao()
-        dao.update(raw!!)
+        db.downloadLabelDao().update(raw!!)
     }
 
-    @Synchronized
     fun moveDownloadLabel(fromPosition: Int, toPosition: Int) {
-        if (fromPosition == toPosition) {
-            return
-        }
-        val reverse = fromPosition > toPosition
-        val offset = if (reverse) toPosition else fromPosition
-        val limit = if (reverse) fromPosition - toPosition + 1 else toPosition - fromPosition + 1
-        val dao = db.downloadLabelDao()
-        val list = dao.list(offset, limit)
-        val step = if (reverse) 1 else -1
-        val start = if (reverse) limit - 1 else 0
-        val end = if (reverse) 0 else limit - 1
-        val toTime = list[end].time
-        var i = end
-        while (if (reverse) i < start else i > 0) {
-            val aTime = list[i].time
-            val bTime = list[i + step].time
-            list[i].time = if (aTime == bTime) bTime + step else bTime
-            i += step
-        }
-        list[start].time = toTime
-        dao.update(list)
+        db.downloadLabelDao().move(fromPosition, toPosition)
     }
 
-    @Synchronized
     fun removeDownloadLabel(raw: DownloadLabel?) {
-        val dao = db.downloadLabelDao()
-        dao.delete(raw!!)
+        db.downloadLabelDao().delete(raw!!)
     }
 
-    @get:Synchronized
     val allLocalFavorites: List<GalleryInfo>
         get() {
             val dao = db.localFavoritesDao()
@@ -168,19 +123,16 @@ object EhDB {
             return ArrayList<GalleryInfo>(list)
         }
 
-    @Synchronized
     fun searchLocalFavorites(query: String): List<GalleryInfo> {
         val dao = db.localFavoritesDao()
         val list = dao.list("%$query%")
         return ArrayList<GalleryInfo>(list)
     }
 
-    @Synchronized
     fun removeLocalFavorites(gid: Long) {
         db.localFavoritesDao().deleteByKey(gid)
     }
 
-    @Synchronized
     fun removeLocalFavorites(gidArray: LongArray) {
         val dao = db.localFavoritesDao()
         for (gid in gidArray) {
@@ -188,42 +140,23 @@ object EhDB {
         }
     }
 
-    @Synchronized
-    fun containLocalFavorites(gid: Long): Boolean {
-        val dao = db.localFavoritesDao()
-        return dao.contains(gid)
-    }
+    fun containLocalFavorites(gid: Long): Boolean = db.localFavoritesDao().contains(gid)
 
-    @Synchronized
     fun putLocalFavorites(galleryInfo: GalleryInfo) {
-        val dao = db.localFavoritesDao()
-        if (null == dao.load(galleryInfo.gid)) {
-            val info: LocalFavoriteInfo
-            if (galleryInfo is LocalFavoriteInfo) {
-                info = galleryInfo
-            } else {
-                info = LocalFavoriteInfo(galleryInfo)
-                info.time = System.currentTimeMillis()
-            }
-            dao.insert(info)
-        }
+        db.localFavoritesDao().insertOrIgnore(toLocalFavoriteInfo(galleryInfo))
     }
 
-    @Synchronized
     fun putLocalFavorites(galleryInfoList: List<GalleryInfo>) {
-        for (gi in galleryInfoList) {
-            putLocalFavorites(gi)
-        }
+        db.localFavoritesDao().insertOrIgnore(galleryInfoList.map(::toLocalFavoriteInfo))
     }
 
-    @get:Synchronized
-    val allQuickSearch: List<QuickSearch>
-        get() {
-            val dao = db.quickSearchDao()
-            return dao.list()
-        }
+    private fun toLocalFavoriteInfo(galleryInfo: GalleryInfo): LocalFavoriteInfo = galleryInfo as? LocalFavoriteInfo ?: LocalFavoriteInfo(galleryInfo).apply {
+        time = System.currentTimeMillis()
+    }
 
-    @Synchronized
+    val allQuickSearch: List<QuickSearch>
+        get() = db.quickSearchDao().list()
+
     fun insertQuickSearch(quickSearch: QuickSearch) {
         val dao = db.quickSearchDao()
         quickSearch.id = null
@@ -231,7 +164,6 @@ object EhDB {
         quickSearch.id = dao.insert(quickSearch)
     }
 
-    @Synchronized
     fun importQuickSearch(quickSearchList: List<QuickSearch?>) {
         val dao = db.quickSearchDao()
         for (quickSearch in quickSearchList) {
@@ -239,112 +171,72 @@ object EhDB {
         }
     }
 
-    @Synchronized
     fun deleteQuickSearch(quickSearch: QuickSearch?) {
         quickSearch ?: return
-        val dao = db.quickSearchDao()
-        dao.delete(quickSearch)
+        db.quickSearchDao().delete(quickSearch)
     }
 
-    @Synchronized
     fun moveQuickSearch(fromPosition: Int, toPosition: Int) {
-        if (fromPosition == toPosition) {
-            return
-        }
-        val reverse = fromPosition > toPosition
-        val offset = if (reverse) toPosition else fromPosition
-        val limit = if (reverse) fromPosition - toPosition + 1 else toPosition - fromPosition + 1
-        val dao = db.quickSearchDao()
-        val list = dao.list(offset, limit)
-        val step = if (reverse) 1 else -1
-        val start = if (reverse) limit - 1 else 0
-        val end = if (reverse) 0 else limit - 1
-        val toTime = list[end].time
-        var i = end
-        while (if (reverse) i < start else i > 0) {
-            val aTime = list[i].time
-            val bTime = list[i + step].time
-            list[i].time = if (aTime == bTime) bTime + step else bTime
-            i += step
-        }
-        list[start].time = toTime
-        dao.update(list)
+        db.quickSearchDao().move(fromPosition, toPosition)
     }
 
-    @get:Synchronized
+    /**
+     * 交给 Paging 的 source：Room 生成的 PagingSource 是惰性的，创建时不碰数据库，
+     * 真正的查询由 Paging 自己的 IO 线程发起，所以这里可以留在主线程。
+     */
     val historyLazyList: PagingSource<Int, HistoryInfo>
         get() = db.historyDao().listLazy()
 
-    @Synchronized
+    /**
+     * 读到第几页（0 基）；没有记录时返回 null。
+     *
+     * 入口带的页码优先于这里，与旧实现 `mPage >= 0 ? mPage : provider.startPage` 一致。
+     */
+    fun getReadingProgress(gid: Long): Int? = db.readingProgressDao().load(gid)?.page
+
+    fun putReadingProgress(gid: Long, page: Int) {
+        db.readingProgressDao().upsert(ReadingProgress(gid, page, System.currentTimeMillis()))
+    }
+
+    fun removeReadingProgress(gid: Long) {
+        db.readingProgressDao().delete(gid)
+    }
+
     fun putHistoryInfo(galleryInfo: GalleryInfo) {
-        val dao = db.historyDao()
         val info = galleryInfo as? HistoryInfo ?: HistoryInfo(galleryInfo)
         info.time = System.currentTimeMillis()
-        if (null != dao.load(info.gid)) {
-            dao.update(info)
-        } else {
-            dao.insert(info)
-        }
+        db.historyDao().upsert(info)
     }
 
-    @Synchronized
     fun updateHistoryFavSlot(gid: Long, slot: Int) {
-        val dao = db.historyDao()
-        val info = dao.load(gid)
-        if (null != info) {
-            info.favoriteSlot = slot
-            dao.update(info)
-        }
+        db.historyDao().updateFavoriteSlot(gid, slot)
     }
 
-    @Synchronized
     fun putHistoryInfo(historyInfoList: List<HistoryInfo>) {
-        val dao = db.historyDao()
-        for (info in historyInfoList) {
-            if (null == dao.load(info.gid)) {
-                dao.insert(info)
-            }
-        }
+        db.historyDao().insertOrIgnore(historyInfoList)
     }
 
-    @Synchronized
     fun deleteHistoryInfo(info: HistoryInfo?) {
-        val dao = db.historyDao()
-        dao.delete(info!!)
+        db.historyDao().delete(info!!)
     }
 
-    @Synchronized
     fun clearHistoryInfo() {
-        val dao = db.historyDao()
-        dao.deleteAll()
+        db.historyDao().deleteAll()
     }
 
-    @get:Synchronized
     val allFilter: List<Filter>
         get() = db.filterDao().list()
 
-    @Synchronized
-    fun addFilter(filter: Filter): Boolean {
-        val existFilter: Filter? = try {
-            db.filterDao().load(filter.text!!, filter.mode)
-        } catch (_: Exception) {
-            null
-        }
-        return if (existFilter == null) {
-            filter.id = null
-            filter.id = db.filterDao().insert(filter)
-            true
-        } else {
-            false
-        }
+    fun addFilter(filter: Filter): Boolean = try {
+        db.filterDao().insertIfAbsent(filter.text!!, filter.mode, filter)
+    } catch (_: Exception) {
+        false
     }
 
-    @Synchronized
     fun deleteFilter(filter: Filter) {
         db.filterDao().delete(filter)
     }
 
-    @Synchronized
     fun triggerFilter(filter: Filter) {
         filter.enable = filter.enable?.not() == true
         db.filterDao().update(filter)
@@ -355,7 +247,6 @@ object EhDB {
         for (item in list) to.insert(item)
     }
 
-    @Synchronized
     fun exportDB(context: Context, uri: Uri): Boolean {
         val ehExportName = "eh.export.db"
         runCatching {
@@ -389,8 +280,9 @@ object EhDB {
     /**
      * @return error string, null for no error
      */
-    @Synchronized
-    fun importDB(context: Context, uri: Uri): String? {
+    // 调用方本来就在 IO（AdvancedFragment 的 launchIO），所以直接 suspend；
+    // 导入是一次性的独占操作，不再需要额外的互斥
+    suspend fun importDB(context: Context, uri: Uri): String? {
         val tmpDBName = "tmp.db"
         runCatching {
             val oldDB = databaseBuilder(context, EhDatabase::class.java, tmpDBName)

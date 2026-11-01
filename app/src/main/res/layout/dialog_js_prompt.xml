@@ -15,16 +15,20 @@
   -->
 
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="@dimen/keyline_margin">
 
+    <!-- message 的文本是运行时 setMessage 塞进去的，静态分析看不到，所以这里要 ignore -->
     <TextView
         android:id="@+id/message"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textAppearance="@style/TextAppearance.AppCompat.Subhead" />
+        android:labelFor="@id/value"
+        android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
+        tools:ignore="LabelFor" />
 
     <EditText
         style="@style/FixedLineHeightEditText"
@@ -32,7 +36,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/keyline_margin"
-        android:inputType="text"
-        android:importantForAutofill="no" />
+        android:importantForAutofill="no"
+        android:inputType="text" />
 
 </LinearLayout>

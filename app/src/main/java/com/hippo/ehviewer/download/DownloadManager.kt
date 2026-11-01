@@ -30,14 +30,19 @@ import com.hippo.ehviewer.spider.SpiderQueen.OnSpiderListener
 import com.hippo.ehviewer.spider.readFromUniFile
 import com.hippo.ehviewer.spider.saveToUniFile
 import com.hippo.image.Image
+import com.hippo.util.launchIO
+import com.hippo.util.withIOContext
 import com.hippo.yorozuya.ConcurrentPool
 import com.hippo.yorozuya.MathUtils
 import com.hippo.yorozuya.ObjectUtils
 import com.hippo.yorozuya.SimpleHandler
 import com.hippo.yorozuya.collect.LongList
 import java.util.LinkedList
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 object DownloadManager : OnSpiderListener {
     // All download info list
@@ -68,8 +73,11 @@ object DownloadManager : OnSpiderListener {
     private var mCurrentSpider: SpiderQueen? = null
 
     init {
+        // 类初始化会读库。`EhApplication` 启动时已经预热过（`launchIO { DownloadManager.isIdle }`），
+        // 但预热是异步的，这里再兜一层 runBlocking(IO)：哪怕 UI 线程先碰到，也只是慢一下，
+        // 不会变成主线程读库——Room 现在不开 allowMainThreadQueries 了
         // Get all download dirname
-        val allDownloadDirname = EhDB.allDownloadDirname
+        val allDownloadDirname = runBlocking(Dispatchers.IO) { EhDB.allDownloadDirname }
         for ((gid, dirname) in allDownloadDirname) {
             if (dirname != null) {
                 mAllDownloadDirname.put(gid, dirname)
@@ -77,7 +85,7 @@ object DownloadManager : OnSpiderListener {
         }
 
         // Get all labels
-        val labels = EhDB.allDownloadLabelList.toMutableList()
+        val labels = runBlocking(Dispatchers.IO) { EhDB.allDownloadLabelList }.toMutableList()
         mLabelList = labels
 
         // Create list for each label
@@ -91,7 +99,7 @@ object DownloadManager : OnSpiderListener {
         mDefaultInfoList = LinkedList()
 
         // Get all info
-        val allInfoList = EhDB.allDownloadInfo
+        val allInfoList = runBlocking(Dispatchers.IO) { EhDB.allDownloadInfo }
         mAllInfoList = LinkedList(allInfoList)
 
         // Create all info map
@@ -112,7 +120,7 @@ object DownloadManager : OnSpiderListener {
                 map[label] = list
                 if (!containLabel(label)) {
                     // Add label to DB and list
-                    labels.add(EhDB.addDownloadLabel(label!!))
+                    labels.add(runBlocking(Dispatchers.IO) { EhDB.addDownloadLabel(label!!) })
                 }
             }
             list.add(info)
@@ -120,18 +128,35 @@ object DownloadManager : OnSpiderListener {
         mWaitList = LinkedList()
         mSpeedReminder = SpeedReminder()
         mDownloadInfoListeners = ArrayList()
+
+        // 持久队列（P6-f）：把上次没下完的接上。STATE_DOWNLOAD 是「上次正在下、没下完」，
+        // 一并降级成 STATE_WAIT 重新排队。这里就把库里的状态改掉，免得内存与库不一致
+        val stateChanged = ArrayList<DownloadInfo>()
+        for (info in mAllInfoList) {
+            when (info.state) {
+                DownloadInfo.STATE_WAIT -> mWaitList.add(info)
+                DownloadInfo.STATE_DOWNLOAD -> {
+                    info.state = DownloadInfo.STATE_WAIT
+                    stateChanged.add(info)
+                    mWaitList.add(info)
+                }
+            }
+        }
+        if (stateChanged.isNotEmpty()) {
+            runBlocking(Dispatchers.IO) { EhDB.updateDownloadInfo(stateChanged) }
+        }
     }
 
     fun getDownloadDirname(gid: Long): String? = mAllDownloadDirname[gid]
 
-    fun putDownloadDirname(gid: Long, dirname: String) {
+    suspend fun putDownloadDirname(gid: Long, dirname: String) {
         mAllDownloadDirname.put(gid, dirname)
-        EhDB.putDownloadDirname(gid, dirname)
+        withIOContext { EhDB.putDownloadDirname(gid, dirname) }
     }
 
-    fun removeDownloadDirname(gid: Long) {
+    suspend fun removeDownloadDirname(gid: Long) {
         mAllDownloadDirname.remove(gid)
-        EhDB.removeDownloadDirname(gid)
+        withIOContext { EhDB.removeDownloadDirname(gid) }
     }
 
     private fun getInfoListForLabel(label: String?): LinkedList<DownloadInfo>? = if (label == null) {
@@ -202,8 +227,9 @@ object DownloadManager : OnSpiderListener {
             info.finished = 0
             info.downloaded = 0
             info.legacy = -1
-            // Update in DB
-            EhDB.putDownloadInfo(info)
+            // Update in DB：火后不管——这里只是状态快照，内存态与通知才是关键路径（P6-c）
+            @OptIn(DelicateCoroutinesApi::class)
+            launchIO { EhDB.putDownloadInfo(info) }
             // Start speed count
             mSpeedReminder.start()
             // Notify start downloading
@@ -220,7 +246,55 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun startDownload(galleryInfo: GalleryInfo, label: String?) {
+    /**
+     * 重建等待队列：把库里 `STATE_WAIT` / `STATE_DOWNLOAD` 的任务重新排上。
+     *
+     * 这两态是持久队列（P6-f）——上次进程被杀时它们留在库里，以前是一起来就抹成
+     * `STATE_NONE`，等于每次启动都丢队列。`STATE_DOWNLOAD` 表示「上次正在下、没下完」，
+     * 恢复时当作 `STATE_WAIT` 重新排队，进度由下载目录里的 SpiderInfo 续上。
+     *
+     * 只重建队列、不自动开始下载；要自动继续用 [resumePendingDownloads]。
+     * 幂等：每次都先清空再重建。
+     *
+     * @return 重新排上的任务数
+     */
+    suspend fun restorePendingDownloads(): Int {
+        mWaitList.clear()
+        val stateChanged = ArrayList<DownloadInfo>()
+        for (info in mAllInfoList) {
+            when (info.state) {
+                DownloadInfo.STATE_WAIT -> mWaitList.add(info)
+                DownloadInfo.STATE_DOWNLOAD -> {
+                    info.state = DownloadInfo.STATE_WAIT
+                    stateChanged.add(info)
+                    mWaitList.add(info)
+                }
+            }
+        }
+        if (stateChanged.isNotEmpty()) {
+            withIOContext { EhDB.updateDownloadInfo(stateChanged) }
+        }
+        return mWaitList.size
+    }
+
+    /**
+     * 恢复队列并立刻继续下载。只给「服务被系统杀掉后重投」这一条路径用——
+     * 用户自己打开 app 时不自动开跑，避免在他不知情的时候吃掉流量。
+     */
+    suspend fun resumePendingDownloads() {
+        // 一般情况（类初始化 / 预热）队列已经接好了；只有「进程活着、服务被杀」这条路径
+        // 才需要重建。这时不能无脑 clear——用户可能已经手动排了队，重排会打乱顺序
+        if (mWaitList.isEmpty()) {
+            restorePendingDownloads()
+        }
+        if (mWaitList.isEmpty()) return
+        for (l in mDownloadInfoListeners) {
+            l!!.onUpdateAll()
+        }
+        ensureDownload()
+    }
+
+    suspend fun startDownload(galleryInfo: GalleryInfo, label: String?) {
         if (mCurrentTask != null && mCurrentTask!!.gid == galleryInfo.gid) {
             // It is current task
             return
@@ -235,7 +309,7 @@ object DownloadManager : OnSpiderListener {
                 // Add to wait list
                 mWaitList.add(info)
                 // Update in DB
-                EhDB.putDownloadInfo(info)
+                withIOContext { EhDB.putDownloadInfo(info) }
                 // Notify state update
                 val list: List<DownloadInfo>? = getInfoListForLabel(info.label)
                 if (list != null) {
@@ -269,7 +343,7 @@ object DownloadManager : OnSpiderListener {
             mWaitList.add(info)
 
             // Save to
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
 
             // Notify
             for (l in mDownloadInfoListeners) {
@@ -279,11 +353,11 @@ object DownloadManager : OnSpiderListener {
             ensureDownload()
 
             // Add it to history
-            EhDB.putHistoryInfo(info)
+            withIOContext { EhDB.putHistoryInfo(info) }
         }
     }
 
-    fun startRangeDownload(gidList: LongList) {
+    suspend fun startRangeDownload(gidList: LongList) {
         var update = false
         for (i in 0 until gidList.size) {
             val gid = gidList[i]
@@ -299,7 +373,7 @@ object DownloadManager : OnSpiderListener {
                 // Add to wait list
                 mWaitList.add(info)
                 // Update in DB
-                EhDB.putDownloadInfo(info)
+                withIOContext { EhDB.putDownloadInfo(info) }
             }
         }
         if (update) {
@@ -307,12 +381,12 @@ object DownloadManager : OnSpiderListener {
             for (l in mDownloadInfoListeners) {
                 l!!.onUpdateAll()
             }
-            // Ensure download
-            ensureDownload()
         }
+        // 同 startAllDownload：选中的可能已经是 STATE_WAIT，无条件 ensure 一次
+        ensureDownload()
     }
 
-    fun startAllDownload() {
+    suspend fun startAllDownload() {
         var update = false
         // Start all STATE_NONE and STATE_FAILED item
         for (info in mAllInfoList) {
@@ -323,7 +397,7 @@ object DownloadManager : OnSpiderListener {
                 // Add to wait list
                 mWaitList.add(info)
                 // Update in DB
-                EhDB.putDownloadInfo(info)
+                withIOContext { EhDB.putDownloadInfo(info) }
             }
         }
         if (update) {
@@ -331,12 +405,13 @@ object DownloadManager : OnSpiderListener {
             for (l in mDownloadInfoListeners) {
                 l!!.onUpdateAll()
             }
-            // Ensure download
-            ensureDownload()
         }
+        // 队列里可能还有上次留下来的 STATE_WAIT（P6-f 的持久队列），
+        // 它们不在这次 update 里，所以不管有没有新加都得确保跑起来
+        ensureDownload()
     }
 
-    fun addDownload(downloadInfoList: List<DownloadInfo>, notify: Boolean = true) {
+    suspend fun addDownload(downloadInfoList: List<DownloadInfo>, notify: Boolean = true) {
         for (info in downloadInfoList) {
             if (containDownloadInfo(info.gid)) {
                 // Contain
@@ -358,7 +433,7 @@ object DownloadManager : OnSpiderListener {
                 mMap[info.label] = list
                 if (!containLabel(info.label)) {
                     // Add label to DB and list
-                    mLabelList.add(EhDB.addDownloadLabel(info.label!!))
+                    mLabelList.add(withIOContext { EhDB.addDownloadLabel(info.label!!) })
                 }
             }
             list.add(info)
@@ -370,7 +445,7 @@ object DownloadManager : OnSpiderListener {
             mAllInfoMap.put(info.gid, info)
 
             // Save to
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
         }
 
         // Sort all download list
@@ -384,17 +459,17 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun addDownloadLabel(downloadLabelList: List<DownloadLabel>) {
+    suspend fun addDownloadLabel(downloadLabelList: List<DownloadLabel>) {
         for (label in downloadLabelList) {
             val labelString = label.label
             if (!containLabel(labelString)) {
                 mMap[labelString] = LinkedList()
-                mLabelList.add(EhDB.addDownloadLabel(label))
+                mLabelList.add(withIOContext { EhDB.addDownloadLabel(label) })
             }
         }
     }
 
-    fun addDownload(galleryInfo: GalleryInfo, label: String?) {
+    suspend fun addDownload(galleryInfo: GalleryInfo, label: String?) {
         if (containDownloadInfo(galleryInfo.gid)) {
             // Contain
             return
@@ -419,7 +494,7 @@ object DownloadManager : OnSpiderListener {
         mAllInfoMap.put(galleryInfo.gid, info)
 
         // Save to
-        EhDB.putDownloadInfo(info)
+        withIOContext { EhDB.putDownloadInfo(info) }
 
         // Notify
         for (l in mDownloadInfoListeners) {
@@ -427,7 +502,7 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun stopDownload(gid: Long) {
+    suspend fun stopDownload(gid: Long) {
         val info = stopDownloadInternal(gid)
         if (info != null) {
             // Update listener
@@ -442,7 +517,7 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun stopCurrentDownload() {
+    suspend fun stopCurrentDownload() {
         val info = stopCurrentDownloadInternal()
         if (info != null) {
             // Update listener
@@ -457,7 +532,7 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun stopRangeDownload(gidList: LongList) {
+    suspend fun stopRangeDownload(gidList: LongList) {
         stopRangeDownloadInternal(gidList)
 
         // Update listener
@@ -469,12 +544,12 @@ object DownloadManager : OnSpiderListener {
         ensureDownload()
     }
 
-    fun stopAllDownload() {
+    suspend fun stopAllDownload() {
         // Stop all in wait list
         for (info in mWaitList) {
             info.state = DownloadInfo.STATE_NONE
             // Update in DB
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
         }
         mWaitList.clear()
 
@@ -487,12 +562,12 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun deleteDownload(gid: Long) {
+    suspend fun deleteDownload(gid: Long) {
         stopDownloadInternal(gid)
         val info = mAllInfoMap[gid]
         if (info != null) {
             // Remove from DB
-            EhDB.removeDownloadInfo(info)
+            withIOContext { EhDB.removeDownloadInfo(info) }
 
             // Remove all list and map
             mAllInfoList.remove(info)
@@ -516,7 +591,7 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun deleteRangeDownload(gidList: LongList) {
+    suspend fun deleteRangeDownload(gidList: LongList) {
         stopRangeDownloadInternal(gidList)
         for (i in 0 until gidList.size) {
             val gid = gidList[i]
@@ -527,7 +602,7 @@ object DownloadManager : OnSpiderListener {
             }
 
             // Remove from DB
-            EhDB.removeDownloadInfo(info)
+            withIOContext { EhDB.removeDownloadInfo(info) }
 
             // Remove from all info map
             mAllInfoList.remove(info)
@@ -547,7 +622,7 @@ object DownloadManager : OnSpiderListener {
         ensureDownload()
     }
 
-    fun moveDownload(fromPosition: Int, toPosition: Int) {
+    suspend fun moveDownload(fromPosition: Int, toPosition: Int) {
         if (fromPosition > toPosition) {
             val time = mAllInfoList[toPosition].time
             for (i in toPosition until fromPosition) {
@@ -556,7 +631,7 @@ object DownloadManager : OnSpiderListener {
                 mAllInfoList[i].time = if (aTime == bTime) bTime + 1 else bTime
             }
             mAllInfoList[fromPosition].time = time
-            EhDB.updateDownloadInfo(mAllInfoList.slice(toPosition..fromPosition))
+            withIOContext { EhDB.updateDownloadInfo(mAllInfoList.slice(toPosition..fromPosition)) }
         } else {
             val time = mAllInfoList[fromPosition].time
             for (i in fromPosition until toPosition) {
@@ -565,7 +640,7 @@ object DownloadManager : OnSpiderListener {
                 mAllInfoList[i].time = if (aTime == bTime) bTime - 1 else bTime
             }
             mAllInfoList[toPosition].time = time
-            EhDB.updateDownloadInfo(mAllInfoList.slice(fromPosition..toPosition))
+            withIOContext { EhDB.updateDownloadInfo(mAllInfoList.slice(fromPosition..toPosition)) }
         }
         val label = mAllInfoList[fromPosition].label
         mAllInfoList.sortByDateDescending()
@@ -573,7 +648,7 @@ object DownloadManager : OnSpiderListener {
         list.sortByDateDescending()
     }
 
-    fun moveDownload(label: String?, fromPosition: Int, toPosition: Int) {
+    suspend fun moveDownload(label: String?, fromPosition: Int, toPosition: Int) {
         val list = getInfoListForLabel(label)
         list?.let {
             val absFromPosition = mAllInfoList.indexOf(it[fromPosition])
@@ -605,7 +680,7 @@ object DownloadManager : OnSpiderListener {
     // Update in DB
     // Update listener
     // No ensureDownload
-    private fun stopDownloadInternal(gid: Long): DownloadInfo? {
+    private suspend fun stopDownloadInternal(gid: Long): DownloadInfo? {
         // Check current task
         if (mCurrentTask != null && mCurrentTask!!.gid == gid) {
             // Stop current
@@ -620,7 +695,7 @@ object DownloadManager : OnSpiderListener {
                 // Update state
                 info.state = DownloadInfo.STATE_NONE
                 // Update in DB
-                EhDB.putDownloadInfo(info)
+                withIOContext { EhDB.putDownloadInfo(info) }
                 return info
             }
         }
@@ -629,7 +704,7 @@ object DownloadManager : OnSpiderListener {
 
     // Update in DB
     // Update mDownloadListener
-    private fun stopCurrentDownloadInternal(): DownloadInfo? {
+    private suspend fun stopCurrentDownloadInternal(): DownloadInfo? {
         val info = mCurrentTask
         val spider = mCurrentSpider
         // Release spider
@@ -648,7 +723,7 @@ object DownloadManager : OnSpiderListener {
         // Update state
         info.state = DownloadInfo.STATE_NONE
         // Update in DB
-        EhDB.putDownloadInfo(info)
+        withIOContext { EhDB.putDownloadInfo(info) }
         // Listener
         if (mDownloadListener != null) {
             mDownloadListener!!.onCancel(info)
@@ -658,7 +733,7 @@ object DownloadManager : OnSpiderListener {
 
     // Update in DB
     // Update mDownloadListener
-    private fun stopRangeDownloadInternal(gidList: LongList) {
+    private suspend fun stopRangeDownloadInternal(gidList: LongList) {
         // Two way
         if (gidList.size < mWaitList.size) {
             for (i in 0 until gidList.size) {
@@ -681,7 +756,7 @@ object DownloadManager : OnSpiderListener {
                     // Update state
                     info.state = DownloadInfo.STATE_NONE
                     // Update in DB
-                    EhDB.putDownloadInfo(info)
+                    withIOContext { EhDB.putDownloadInfo(info) }
                 }
             }
         }
@@ -690,7 +765,7 @@ object DownloadManager : OnSpiderListener {
     /**
      * @param label Not allow new label
      */
-    fun changeLabel(list: List<DownloadInfo>, label: String?) {
+    suspend fun changeLabel(list: List<DownloadInfo>, label: String?) {
         if (null != label && !containLabel(label)) {
             Log.e(TAG, "Not exits label: $label")
             return
@@ -715,34 +790,34 @@ object DownloadManager : OnSpiderListener {
             dstList.sortByDateDescending()
 
             // Save to DB
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
         }
         for (l in mDownloadInfoListeners) {
             l!!.onReload()
         }
     }
 
-    fun addLabel(label: String?) {
+    suspend fun addLabel(label: String?) {
         if (label == null || containLabel(label)) {
             return
         }
-        mLabelList.add(EhDB.addDownloadLabel(label))
+        mLabelList.add(withIOContext { EhDB.addDownloadLabel(label) })
         mMap[label] = LinkedList()
         for (l in mDownloadInfoListeners) {
             l!!.onUpdateLabels()
         }
     }
 
-    fun moveLabel(fromPosition: Int, toPosition: Int) {
+    suspend fun moveLabel(fromPosition: Int, toPosition: Int) {
         val item = mLabelList.removeAt(fromPosition)
         mLabelList.add(toPosition, item)
-        EhDB.moveDownloadLabel(fromPosition, toPosition)
+        withIOContext { EhDB.moveDownloadLabel(fromPosition, toPosition) }
         for (l in mDownloadInfoListeners) {
             l!!.onUpdateLabels()
         }
     }
 
-    fun renameLabel(from: String, to: String) {
+    suspend fun renameLabel(from: String, to: String) {
         // Find in label list
         var found = false
         for (raw in mLabelList) {
@@ -750,7 +825,7 @@ object DownloadManager : OnSpiderListener {
                 found = true
                 raw.label = to
                 // Update in DB
-                EhDB.updateDownloadLabel(raw)
+                withIOContext { EhDB.updateDownloadLabel(raw) }
                 break
             }
         }
@@ -763,7 +838,7 @@ object DownloadManager : OnSpiderListener {
         for (info in list) {
             info.label = to
             // Update in DB
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
         }
         // Put list back with new label
         mMap[to] = list
@@ -774,7 +849,7 @@ object DownloadManager : OnSpiderListener {
         }
     }
 
-    fun deleteLabel(label: String) {
+    suspend fun deleteLabel(label: String) {
         // Find in label list and remove
         var found = false
         val iterator = mLabelList.iterator()
@@ -783,7 +858,7 @@ object DownloadManager : OnSpiderListener {
             if (label == raw.label) {
                 found = true
                 iterator.remove()
-                EhDB.removeDownloadLabel(raw)
+                withIOContext { EhDB.removeDownloadLabel(raw) }
                 break
             }
         }
@@ -796,7 +871,7 @@ object DownloadManager : OnSpiderListener {
         for (info in list) {
             info.label = null
             // Update in DB
-            EhDB.putDownloadInfo(info)
+            withIOContext { EhDB.putDownloadInfo(info) }
             mDefaultInfoList.add(info)
         }
 
@@ -1111,8 +1186,9 @@ object DownloadManager : OnSpiderListener {
                         } else {
                             info.state = DownloadInfo.STATE_FAILED
                         }
-                        // Update in DB
-                        EhDB.putDownloadInfo(info)
+                        // Update in DB：这里在 SimpleHandler 的 Runnable 里，只能火后不管
+                        @OptIn(DelicateCoroutinesApi::class)
+                        launchIO { EhDB.putDownloadInfo(info) }
                         // Notify
                         if (mDownloadListener != null) {
                             mDownloadListener!!.onFinish(info)

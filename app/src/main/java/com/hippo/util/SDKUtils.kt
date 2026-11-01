@@ -18,15 +18,7 @@
 package com.hippo.util
 
 import android.os.Build
-import android.os.ext.SdkExtensions
 
-val isAtLeastN = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
-val isAtLeastO = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-val isAtLeastOMR1 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1
-val isAtLeastP = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-val isAtLeastQ = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-val isAtLeastR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-val isAtLeastS = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+// minSdk 是 31（S），所以 N / O / P / Q / S 的判断恒真，已经全部删掉。
+// 只剩 T 还有意义
 val isAtLeastT = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-val isAtLeastU = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-val isAtLeastSExtension7 = isAtLeastR && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 7

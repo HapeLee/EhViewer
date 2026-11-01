@@ -61,17 +61,13 @@
     <!-- Gallery Activity -->
     <string name="archive_need_passwd">アーカイブにはパスワードが必要です</string>
     <string name="archive_passwd">パスワード</string>
-    <string name="passwd_cannot_be_empty">パスワードは空欄にできません</string>
-    <string name="passwd_wrong">パスワードが違います</string>
     <string name="page_menu_title">ページ: %d</string>
     <string name="page_menu_refresh">@string/refresh</string>
     <string name="page_menu_share">@string/share</string>
     <string name="page_menu_save">保存</string>
     <string name="page_menu_save_to">名前を付けて保存…</string>
     <string name="page_menu_download_original">オリジナルをダウンロード</string>
-    <string name="gallery_menu_title">メニュー</string>
     <string name="share_image">画像を共有</string>
-    <string name="start_download_original">ダウンロード中、お待ちください…</string>
     <string name="image_saved">画像は「%s」に保存されました</string>
     <!-- Navigation Bar -->
     <string name="homepage">ホーム</string>
@@ -118,14 +114,9 @@
     <string name="remove_from_favorite_failure">お気に入りからの削除に失敗しました</string>
     <!-- Gallery List Fab Action -->
     <string name="go_to">ページに移動</string>
-    <string name="go_to_gid">GID、最後のページは空白にします</string>
-    <string name="go_to_hint">ページ: %1$d - 合計: %2$d ページ</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">クイック検索</string>
-    <string name="quick_search_tip">「+」をタップしてクイック検索を追加します</string>
-    <string name="readme">README</string>
     <string name="add_quick_search_tip">ギャラリー検索結果の設定などはクイック検索として保存されます。検索の設定などを保存するには、まず検索を実行してください。</string>
-    <string name="add_quick_search_dialog_title">クイック検索を追加</string>
     <string name="save_progress">進捗を保存</string>
     <string name="name_is_empty">タイトルが空欄です</string>
     <string name="duplicate_name">この名前は既に使用されています。</string>
@@ -133,7 +124,6 @@
     <string name="duplicate_quick_search">「%s」のクイック検索はすでに存在しています。</string>
     <string name="delete">削除</string>
     <string name="delete_quick_search_title">クイック検索を削除</string>
-    <string name="delete_quick_search_message">「%s」を削除しますか？</string>
     <!-- Gallery Search -->
     <string name="search_normal">通常検索</string>
     <string name="search_normal_search">通常検索</string>
@@ -142,7 +132,6 @@
     <string name="search_specify_tag">タグを指定する</string>
     <string name="search_tip">通常検索: 通常通りに検索します。\n\n購読を検索: 購読内を検索します。\n\nアップローダーを指定: 指定したアップローダーによってアップロードされたギャラリーを検索します(その他のオプションは無視されます)。\n\nタグを指定: 指定したタグを含むギャラリーを検索します(受け入れられるタグは 1 つのみでその他のオプションは無視されます)。</string>
     <string name="search_enable_advance">高度なオプションを有効化する</string>
-    <string name="search_advance">高度なオプション</string>
     <string name="search_sh">削除済みのギャラリーを表示</string>
     <string name="search_sto">Torrent のあるギャラリーのみを表示</string>
     <string name="search_sr">評価の下限</string>
@@ -170,8 +159,6 @@
     <!-- Category -->
     <!-- Gallery Detail Scene -->
     <string name="download_upgradeable">アップグレードができます</string>
-    <string name="download_upgrade_existed">ギャラリーはすでに存在します。削除をして再度やり直してください。</string>
-    <string name="download_upgrade_service_failed">システムの制限により、ダウンロードサービスをバックグラウンドから開始できません。開始をするには「OK」をタップしてください。</string>
     <string name="read_from">%d ページを読む</string>
     <plurals name="page_count">
         <item quantity="other">%d ページ</item>
@@ -202,7 +189,6 @@
     <string name="open_in_other_app">他のアプリで開く</string>
     <string name="filter_the_uploader">アップローダーの「%s」をブロックしますか？</string>
     <string name="filter_added">ブロックを追加しました</string>
-    <string name="copy_trans">翻訳をコピー</string>
     <string name="show_definition">ヘルプを表示</string>
     <string name="filter_the_tag">「%s」のタグをブロックしますか？</string>
     <string name="tag_vote_up">評価を上げる</string>
@@ -213,8 +199,6 @@
     <string name="vote_failed">評価に失敗しました</string>
     <!-- Gallery Info -->
     <string name="gallery_info">ギャラリー情報</string>
-    <string name="header_key">キー</string>
-    <string name="header_value">値</string>
     <string name="key_url">URL</string>
     <string name="key_title">タイトル</string>
     <string name="key_title_jpn">日本語のタイトル</string>
@@ -236,7 +220,6 @@
     <string name="key_torrent_url">Torrent URL</string>
     <string name="copied_to_clipboard">クリップボードにコピーしました</string>
     <!-- Gallery Torrents -->
-    <string name="torrents">Torrent</string>
     <string name="no_torrents">Torrent なし</string>
     <string name="download_torrent_started">Torrent のダウンロードを開始しました</string>
     <string name="download_torrent_failure">Torrent でのダウンロードに失敗しました</string>
@@ -264,7 +247,6 @@
     <string name="rating3">とても悪い</string>
     <string name="rating2">目の障害になる</string>
     <string name="rating1">悪くて呼吸できない</string>
-    <string name="rating0">…</string>
     <!-- Gallery Comments -->
     <string name="gallery_comments">ギャラリーのコメント</string>
     <string name="no_one_comments_gallery">コメントはありません。</string>
@@ -288,12 +270,7 @@
     <string name="vote_down_successfully">低評価しました</string>
     <string name="cancel_vote_down_successfully">低評価を取り消しました</string>
     <string name="check_vote_status">評価の詳細を表示</string>
-    <string name="format_bold"><b>太字</b></string>
-    <string name="format_italic"><i>斜体</i></string>
-    <string name="format_strikethrough"><strike>打ち消し線</strike></string>
-    <string name="format_underline"><u>下線</u></string>
     <string name="format_url">URL</string>
-    <string name="format_plain">プレーンテキスト</string>
     <!-- Gallery Previews -->
     <string name="gallery_previews">ギャラリーのプレビュー</string>
     <!-- Favorites Scene -->
@@ -311,7 +288,6 @@
     <string name="delete_favorites_dialog_message">%d 件の項目をお気に入りリストから削除しますか？</string>
     <string name="move_favorites_dialog_title">お気に入りを移動</string>
     <!-- History Scene -->
-    <string name="no_history">閲覧したギャラリーはここに表示されます</string>
     <string name="clear_all">すべて消去</string>
     <string name="clear_all_history">履歴をすべて消去しますか？</string>
     <!-- Download Scene -->
@@ -399,6 +375,10 @@
     <string name="settings_eh_my_tags">マイタグ</string>
     <string name="settings_eh_my_tags_summary">E-Hentai のウェブサイトでマイタグを管理します</string>
     <string name="settings_eh_black_dark_theme">ブラックダークテーマ</string>
+    <string name="dark_theme">テーマ</string>
+    <string name="dark_theme_follow_system">システムに従う</string>
+    <string name="dark_theme_off">オフ</string>
+    <string name="dark_theme_on">オン</string>
     <string name="settings_eh_launch_page">起動ページ</string>
     <string name="settings_eh_list_mode">リストモード</string>
     <string name="settings_eh_list_mode_detail">詳細</string>
@@ -453,9 +433,6 @@
     <string name="settings_read_theme_dark">ダーク</string>
     <string name="settings_read_theme_light">ライト</string>
     <string name="settings_read_keep_screen_on">常に画面を ON にする</string>
-    <string name="settings_read_show_clock">時計を表示する</string>
-    <string name="settings_read_show_progress">進捗を表示する</string>
-    <string name="settings_read_show_battery">バッテリーを表示する</string>
     <string name="settings_read_show_page_interval">ページ間隔を表示する</string>
     <string name="settings_read_turn_page_interval">ページ遷移の間隔 (秒単位)</string>
     <string name="settings_read_volume_page">音量ボタンでページをめくる</string>
@@ -485,7 +462,6 @@
     <string name="settings_download_download_origin_image_never">しない</string>
     <string name="settings_download_download_origin_image_force">常にする</string>
     <string name="settings_download_download_origin_image_only">ダウンロードのみ</string>
-    <string name="settings_download_task_confirm">このアクションを実行しても良いですか？</string>
     <string name="settings_download_restore_download_items">ダウンロードタスクを復元</string>
     <string name="settings_download_restore_download_items_summary">ダウンロードディレクトリのダウンロードタスクを復元します</string>
     <string name="settings_download_restore_not_found">復元可能なダウンロードが見つかりません</string>
@@ -584,24 +560,19 @@
     <string name="error_cant_find_activity">アクティビティが見つかりません。</string>
     <string name="error_cannot_parse_the_url">リンクを解析できません。</string>
     <string name="error_decoding_failed">デコードに失敗しました</string>
-    <string name="error_empty">空欄</string>
     <string name="error_reading_failed">読み込めませんでした</string>
     <string name="error_out_of_range">範囲外</string>
-    <string name="error_write_failed">書き込みに失敗しました</string>
     <string name="error_parse_error">ファイルの解析に失敗しました</string>
     <string name="error_invalid_url">無効なリンクです</string>
     <string name="error_get_ptoken_error">pToken 取得エラー</string>
     <string name="error_cant_create_temp_file">一時ファイルを作成できませんでした</string>
     <string name="error_cant_save_image">画像を保存できませんでした</string>
-    <string name="error_invalid_number">無効な数字です</string>
     <string name="error_please_login_first">ログインをしてください</string>
     <string name="error_cannot_find_gallery">ギャラリーが見つかりませんでした</string>
     <string name="error_something_wrong_happened">エラーが発生しました</string>
-    <string name="kokomade_tip">設定 -&gt; Eh -&gt; ギャラリーサイト -&gt; E-Hentai</string>
     <string name="no_browser_installed">ブラウザをインストールしてください。</string>
     <string name="cloudflare_bypass_failed">Cloudflare チャレンジのバイパスに失敗しました</string>
     <string name="open_in_webview">WebView で URL を開いてチャレンジを完了しますか？</string>
-    <string name="information_webview_outdated">WebViewアプリを更新して互換性を向上させてください</string>
     <!-- Readable Time -->
     <string name="from_the_future">未来から</string>
     <string name="just_now">たった今</string>
@@ -628,4 +599,5 @@
     <plurals name="year">
         <item quantity="other">年</item>
     </plurals>
+    <string name="night_mode">ナイトモード</string>
 </resources>

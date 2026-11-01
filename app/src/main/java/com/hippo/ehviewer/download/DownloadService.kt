@@ -43,9 +43,11 @@ import com.hippo.ehviewer.ui.compose.nav.SCENE_NAME_DOWNLOADS
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
 import com.hippo.util.ReadableTime
 import com.hippo.util.getParcelableExtraCompat
+import com.hippo.util.launchUI
 import com.hippo.yorozuya.FileUtils
 import com.hippo.yorozuya.SimpleHandler
 import com.hippo.yorozuya.collect.LongList
+import kotlinx.coroutines.DelicateCoroutinesApi
 
 class DownloadService :
     Service(),
@@ -99,10 +101,28 @@ class DownloadService :
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        handleIntent(intent)
+        if (intent == null) {
+            // START_STICKY 的重投：服务（或进程）被系统杀掉后又起来，把队列接上继续下
+            resumeAfterRebirth()
+        } else {
+            handleIntent(intent)
+        }
         return START_STICKY
     }
 
+    // 与 handleIntent 同理：DownloadManager 的写是 suspend，内存态与监听器通知留在调用线程，
+    // 所以这里用 launchUI 在主线程起协程，不能用 launchIO
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun resumeAfterRebirth() {
+        launchUI {
+            mDownloadManager?.resumePendingDownloads()
+            checkStopSelf()
+        }
+    }
+
+    // DownloadManager 的写操作现在是 suspend（P6-c），DB 部分自己切到 IO，
+    // 内存态与监听器通知留在调用线程——所以这里要走主线程起协程，不能用 launchIO
+    @OptIn(DelicateCoroutinesApi::class)
     private fun handleIntent(intent: Intent?) {
         var action: String? = null
         intent?.action?.let {
@@ -112,44 +132,44 @@ class DownloadService :
             val gi = intent!!.getParcelableExtraCompat<GalleryInfo>(KEY_GALLERY_INFO)
             val label = intent.getStringExtra(KEY_LABEL)
             if (gi != null && mDownloadManager != null) {
-                mDownloadManager!!.startDownload(gi, label)
+                launchUI { mDownloadManager!!.startDownload(gi, label) }
             }
         } else if (ACTION_START_RANGE == action) {
             val gidList = intent!!.getParcelableExtraCompat<LongList>(KEY_GID_LIST)
             if (gidList != null && mDownloadManager != null) {
-                mDownloadManager!!.startRangeDownload(gidList)
+                launchUI { mDownloadManager!!.startRangeDownload(gidList) }
             }
         } else if (ACTION_START_ALL == action) {
             if (mDownloadManager != null) {
-                mDownloadManager!!.startAllDownload()
+                launchUI { mDownloadManager!!.startAllDownload() }
             }
         } else if (ACTION_STOP == action) {
             val gid = intent!!.getLongExtra(KEY_GID, -1)
             if (gid != -1L && mDownloadManager != null) {
-                mDownloadManager!!.stopDownload(gid)
+                launchUI { mDownloadManager!!.stopDownload(gid) }
             }
         } else if (ACTION_STOP_CURRENT == action) {
             if (mDownloadManager != null) {
-                mDownloadManager!!.stopCurrentDownload()
+                launchUI { mDownloadManager!!.stopCurrentDownload() }
             }
         } else if (ACTION_STOP_RANGE == action) {
             val gidList = intent!!.getParcelableExtraCompat<LongList>(KEY_GID_LIST)
             if (gidList != null && mDownloadManager != null) {
-                mDownloadManager!!.stopRangeDownload(gidList)
+                launchUI { mDownloadManager!!.stopRangeDownload(gidList) }
             }
         } else if (ACTION_STOP_ALL == action) {
             if (mDownloadManager != null) {
-                mDownloadManager!!.stopAllDownload()
+                launchUI { mDownloadManager!!.stopAllDownload() }
             }
         } else if (ACTION_DELETE == action) {
             val gid = intent!!.getLongExtra(KEY_GID, -1)
             if (gid != -1L && mDownloadManager != null) {
-                mDownloadManager!!.deleteDownload(gid)
+                launchUI { mDownloadManager!!.deleteDownload(gid) }
             }
         } else if (ACTION_DELETE_RANGE == action) {
             val gidList = intent!!.getParcelableExtraCompat<LongList>(KEY_GID_LIST)
             if (gidList != null && mDownloadManager != null) {
-                mDownloadManager!!.deleteRangeDownload(gidList)
+                launchUI { mDownloadManager!!.deleteRangeDownload(gidList) }
             }
         } else if (ACTION_CLEAR == action) {
             clear()
@@ -230,9 +250,10 @@ class DownloadService :
         m509Delay = NotificationDelay(this, mNotifyManager!!, m509dBuilder!!, ID_509)
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     override fun onGet509() {
         if (mDownloadManager != null) {
-            mDownloadManager!!.stopAllDownload()
+            launchUI { mDownloadManager!!.stopAllDownload() }
         }
         if (mNotifyManager == null) {
             return

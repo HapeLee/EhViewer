@@ -114,7 +114,7 @@ object GalleryListParser {
                 child = children[0]
                 children = child.children()
             }
-            gi.title = child.text().trim { it <= ' ' }
+            gi.title = child.text().trim()
         }
         if (gi.title == null) {
             return null
@@ -201,7 +201,7 @@ object GalleryListParser {
         // Posted
         val posted = e.getElementById("posted_" + gi.gid)
         if (posted != null) {
-            gi.posted = posted.text().trim { it <= ' ' }
+            gi.posted = posted.text().trim()
             gi.favoriteSlot = parseFavoriteSlot(posted.attr("style"))
         }
         if (gi.favoriteSlot < 0) {
@@ -232,7 +232,7 @@ object GalleryListParser {
                 val div = children[uploaderIndex]
                 gi.disowned = div.attr("style").contains("opacity:0.5")
                 val a = div.children().first()
-                gi.uploader = a?.text()?.trim { it <= ' ' } ?: div.text().trim { it <= ' ' }
+                gi.uploader = a?.text()?.trim() ?: div.text().trim()
             }
             if (children.size > pagesIndex) {
                 val matcher = PATTERN_PAGES.matcher(children[pagesIndex].text())
@@ -256,7 +256,7 @@ object GalleryListParser {
         // Favorite note
         val glfnote = JsoupUtils.getElementByClass(e, "glfnote")
         if (glfnote != null) {
-            val favoriteNote = glfnote.text().trim { it <= ' ' }
+            val favoriteNote = glfnote.text().trim()
             if (favoriteNote.isNotEmpty()) {
                 gi.favoriteNote = favoriteNote
             }
@@ -297,7 +297,7 @@ object GalleryListParser {
             val ptt = d.getElementsByClass("ptt").first()
             if (ptt != null) {
                 val es = ptt.child(0).child(0).children()
-                result.pages = es[es.size - 2].text().trim { it <= ' ' }.toInt()
+                result.pages = es[es.size - 2].text().trim().toInt()
                 var e = es[es.size - 1]
                 e = e.children().first() as Element
                 val href = e.attr("href")

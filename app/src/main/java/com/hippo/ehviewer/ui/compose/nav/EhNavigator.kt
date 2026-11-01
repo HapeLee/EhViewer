@@ -37,6 +37,14 @@ interface EhNavigator {
 
     /** 用新页面替换当前页面（压新的、摘旧的），用于「进度页 → 详情页」这类中转页 */
     fun replaceTop(route: EhRoute)
+
+    /**
+     * 当前页面是不是栈底。
+     *
+     * 只有栈底页面需要「再按一次退出」这类宿主级行为；其余页面的返回键交给
+     * `NavDisplay` 直接弹栈。旧实现看的是 `SceneFragment.stackIndex`。
+     */
+    val isRoot: Boolean
 }
 
 /** 能提供返回栈的宿主；[EhNavHostActivity] 实现它 */
@@ -66,4 +74,5 @@ private object NoOpNavigator : EhNavigator {
     override fun push(route: EhRoute) = Unit
     override fun pop() = Unit
     override fun replaceTop(route: EhRoute) = Unit
+    override val isRoot = true
 }

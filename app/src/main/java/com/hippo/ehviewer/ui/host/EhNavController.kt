@@ -42,6 +42,9 @@ class EhNavController internal constructor(
     val size: Int
         get() = (attached ?: entries).size
 
+    override val isRoot: Boolean
+        get() = size <= 1
+
     val currentRoute: EhRoute?
         get() = (attached ?: entries).lastOrNull() as? EhRoute
 

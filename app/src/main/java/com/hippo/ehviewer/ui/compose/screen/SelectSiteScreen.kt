@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -51,7 +52,7 @@ import com.hippo.ehviewer.client.EhUrl
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SelectSiteScreen(onConfirm: (Int) -> Unit) {
-    var site by rememberSaveable { mutableStateOf(EhUrl.SITE_EX) }
+    var site by rememberSaveable { mutableIntStateOf(EhUrl.SITE_EX) }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier

@@ -25,7 +25,6 @@ import android.content.pm.verify.domain.DomainVerificationUserState
 import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.text.TextUtils
@@ -33,9 +32,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.IdRes
-import androidx.annotation.RequiresApi
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
@@ -56,6 +53,11 @@ import com.hippo.ehviewer.client.data.ListUrlBuilder
 import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
+import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_HOMEPAGE
+import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_SUBSCRIPTION
+import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_TOP_LIST
+import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_WHATS_HOT
+import com.hippo.ehviewer.ui.compose.nav.ReaderSource
 import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
@@ -63,22 +65,15 @@ import com.hippo.ehviewer.ui.compose.nav.homepageRoute
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.isSolidRoute
 import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
-import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
 import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
-import com.hippo.ehviewer.ui.scene.BaseScene
-import com.hippo.ehviewer.ui.scene.GalleryListScene
-import com.hippo.scene.Announcer
-import com.hippo.scene.SceneFragment
+import com.hippo.ehviewer.ui.host.TIP_LENGTH_LONG
 import com.hippo.unifile.UniFile
 import com.hippo.unifile.sha1
 import com.hippo.util.addTextToClipboard
 import com.hippo.util.getClipboardManager
 import com.hippo.util.getParcelableExtraCompat
 import com.hippo.util.getUrlFromClipboard
-import com.hippo.util.isAtLeastQ
-import com.hippo.util.isAtLeastS
-import com.hippo.widget.DrawerView
 import com.hippo.widget.LoadImageView
 import com.hippo.yorozuya.SimpleHandler
 import com.hippo.yorozuya.ViewUtils
@@ -87,15 +82,10 @@ class MainActivity :
     EhNavHostActivity(),
     EhHost,
     NavigationView.OnNavigationItemSelectedListener {
-    private val settingsLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            if (it.resultCode == RESULT_OK) refreshTopScene()
-        }
     private lateinit var connectivityManager: ConnectivityManager
     private var mSnackBar: CoordinatorLayout? = null
     private var mDrawerLayout: DrawerLayout? = null
     private var mNavView: NavigationView? = null
-    private var mRightDrawer: DrawerView? = null
     private var mAvatar: LoadImageView? = null
     private var mDisplayName: TextView? = null
     private var mNavCheckedItem = 0
@@ -116,6 +106,11 @@ class MainActivity :
             val route = EhUrlOpener.parseUrl(uri.toString())
             if (route != null) {
                 pushRoute(route)
+                return true
+            }
+            // 不是画廊链接：外部「用 EhViewer 打开压缩包」
+            if (uri.scheme == "file" || uri.scheme == "content") {
+                pushRoute(EhRoute.Reader(uri = uri.toString(), source = ReaderSource.ARCHIVE))
                 return true
             }
         } else if (Intent.ACTION_SEND == action) {
@@ -184,7 +179,6 @@ class MainActivity :
         mSnackBar = ViewUtils.`$$`(this, R.id.snackbar) as CoordinatorLayout
         mDrawerLayout = ViewUtils.`$$`(this, R.id.draw_view) as DrawerLayout
         mNavView = ViewUtils.`$$`(this, R.id.nav_view) as NavigationView
-        mRightDrawer = ViewUtils.`$$`(this, R.id.right_drawer) as DrawerView
         if (mDrawerLayout != null) {
             mDrawerLayout!!.setStatusBarBackgroundColor(0)
         }
@@ -214,12 +208,10 @@ class MainActivity :
             if (Settings.meteredNetworkWarning) {
                 checkMeteredNetwork()
             }
-            if (isAtLeastS) {
-                if (!Settings.appLinkVerifyTip) {
-                    try {
-                        checkAppLinkVerify()
-                    } catch (_: PackageManager.NameNotFoundException) {
-                    }
+            if (!Settings.appLinkVerifyTip) {
+                try {
+                    checkAppLinkVerify()
+                } catch (_: PackageManager.NameNotFoundException) {
                 }
             }
         } else {
@@ -227,7 +219,6 @@ class MainActivity :
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.S)
     @Throws(PackageManager.NameNotFoundException::class)
     private fun checkAppLinkVerify() {
         val manager = getSystemService(DomainVerificationManager::class.java)
@@ -286,7 +277,7 @@ class MainActivity :
 
     private fun checkMeteredNetwork() {
         if (connectivityManager.isActiveNetworkMetered) {
-            if (isAtLeastQ && mSnackBar != null) {
+            if (mSnackBar != null) {
                 Snackbar.make(
                     mSnackBar!!,
                     R.string.metered_network_warning,
@@ -299,7 +290,7 @@ class MainActivity :
                     }
                     .show()
             } else {
-                showTip(R.string.metered_network_warning, BaseScene.LENGTH_LONG)
+                showTip(R.string.metered_network_warning, TIP_LENGTH_LONG)
             }
         }
     }
@@ -319,7 +310,6 @@ class MainActivity :
         super.onDestroy()
         mDrawerLayout = null
         mNavView = null
-        mRightDrawer = null
         mAvatar = null
         mDisplayName = null
     }
@@ -383,46 +373,6 @@ class MainActivity :
         Settings.putClipboardTextHashCode(hashCode)
     }
 
-    override fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {
-        super.onSceneViewCreated(scene, savedInstanceState)
-        createDrawerView(scene)
-    }
-
-    override fun recreateDrawerView(scene: BaseScene) {
-        createDrawerView(scene)
-    }
-
-    @SuppressLint("RtlHardcoded")
-    fun createDrawerView(scene: SceneFragment?) {
-        if (scene is BaseScene && mRightDrawer != null && mDrawerLayout != null) {
-            mRightDrawer!!.removeAllViews()
-            val drawerView = scene.createDrawerView(
-                scene.layoutInflater,
-                mRightDrawer,
-                null,
-            )
-            if (drawerView != null) {
-                mRightDrawer!!.addView(drawerView)
-                mDrawerLayout!!.setDrawerLockMode(
-                    DrawerLayout.LOCK_MODE_UNLOCKED,
-                    GravityCompat.END,
-                )
-            } else {
-                mDrawerLayout!!.setDrawerLockMode(
-                    DrawerLayout.LOCK_MODE_LOCKED_CLOSED,
-                    GravityCompat.END,
-                )
-            }
-        }
-    }
-
-    override fun onSceneViewDestroyed(scene: SceneFragment) {
-        super.onSceneViewDestroyed(scene)
-        if (scene is BaseScene) {
-            scene.destroyDrawerView()
-        }
-    }
-
     override fun updateProfile() {
         if (mAvatar == null || mDisplayName == null) {
             return
@@ -484,7 +434,7 @@ class MainActivity :
     }
 
     private val isDrawerOpen
-        get() = mNavView?.isVisible == true || mRightDrawer?.isVisible == true
+        get() = mNavView?.isVisible == true
 
     /**
      * If activity is running, show snack bar, otherwise show toast
@@ -494,13 +444,13 @@ class MainActivity :
             Snackbar.make(
                 mSnackBar!!,
                 message,
-                if (length == BaseScene.LENGTH_LONG) Snackbar.LENGTH_LONG else Snackbar.LENGTH_SHORT,
+                if (length == TIP_LENGTH_LONG) Snackbar.LENGTH_LONG else Snackbar.LENGTH_SHORT,
             ).show()
         } else {
             Toast.makeText(
                 this,
                 message,
-                if (length == BaseScene.LENGTH_LONG) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
+                if (length == TIP_LENGTH_LONG) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
             ).show()
         }
     }
@@ -523,16 +473,16 @@ class MainActivity :
         val id = item.itemId
         when (id) {
             R.id.nav_homepage -> {
-                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_HOMEPAGE))
+                navController.pushAsRoot(homepageRoute(LIST_ACTION_HOMEPAGE))
             }
             R.id.nav_subscription -> {
-                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_SUBSCRIPTION))
+                navController.pushAsRoot(homepageRoute(LIST_ACTION_SUBSCRIPTION))
             }
             R.id.nav_whats_hot -> {
-                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_WHATS_HOT))
+                navController.pushAsRoot(homepageRoute(LIST_ACTION_WHATS_HOT))
             }
             R.id.nav_toplist -> {
-                navController.pushAsRoot(homepageRoute(GalleryListScene.ACTION_TOP_LIST))
+                navController.pushAsRoot(homepageRoute(LIST_ACTION_TOP_LIST))
             }
             R.id.nav_favourite -> {
                 pushRoute(EhRoute.Favorites)
@@ -544,8 +494,7 @@ class MainActivity :
                 pushRoute(EhRoute.Downloads())
             }
             R.id.nav_settings -> {
-                val intent = Intent(this, SettingsActivity::class.java)
-                settingsLauncher.launch(intent)
+                pushRoute(EhRoute.Settings)
             }
         }
         if (id != R.id.nav_stub) {

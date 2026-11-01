@@ -40,6 +40,7 @@ import coil3.util.DebugLogger
 import com.hippo.ehviewer.client.EhCookieStore
 import com.hippo.ehviewer.client.EhDns
 import com.hippo.ehviewer.client.EhEngine
+import com.hippo.ehviewer.client.EhFilter
 import com.hippo.ehviewer.client.EhSSLSocketFactory
 import com.hippo.ehviewer.client.EhTagDatabase
 import com.hippo.ehviewer.client.data.GalleryDetail
@@ -52,7 +53,6 @@ import com.hippo.ehviewer.ui.keepNoMediaFileStatus
 import com.hippo.ehviewer.widget.SearchDatabase
 import com.hippo.okhttp.CloudflareInterceptor
 import com.hippo.util.ReadableTime
-import com.hippo.util.isAtLeastP
 import com.hippo.util.launchIO
 import com.hippo.util.loadHtml
 import com.hippo.yorozuya.FileUtils
@@ -113,7 +113,12 @@ class EhApplication :
                 ehDatabase
             }
             launchIO {
+                // 预热 DownloadManager：类初始化会读库，并把持久队列接回内存（P6-f）
                 DownloadManager.isIdle
+            }
+            launchIO {
+                // 过滤器是懒加载的，预热一下让类初始化落在 IO 线程
+                EhFilter.warmUp()
             }
             launchIO {
                 cleanupDownload()

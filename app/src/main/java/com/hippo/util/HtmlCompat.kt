@@ -22,16 +22,6 @@ import android.text.Spanned
 import com.hippo.text.URLImageGetter
 import com.hippo.widget.ObservedTextView
 
-@Suppress("DEPRECATION")
-fun loadHtml(source: String): Spanned = if (isAtLeastN) {
-    Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY)
-} else {
-    Html.fromHtml(source)
-}
+fun loadHtml(source: String): Spanned = Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY)
 
-@Suppress("DEPRECATION")
-fun loadHtml(source: String?, textView: ObservedTextView): Spanned = if (isAtLeastN) {
-    Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY, URLImageGetter(textView), null)
-} else {
-    Html.fromHtml(source, URLImageGetter(textView), null)
-}
+fun loadHtml(source: String?, textView: ObservedTextView): Spanned = Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY, URLImageGetter(textView), null)

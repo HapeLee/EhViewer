@@ -27,13 +27,11 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 
 private fun sendFileTotally(from: FileDescriptor, to: FileDescriptor): Long {
-    if (isAtLeastP) {
-        // sendFile may fail on some devices
-        try {
-            return Os.sendfile(to, from, Int64Ref(0), Long.MAX_VALUE)
-        } catch (e: Exception) {
-            Log.e("sendFile", "failed", e)
-        }
+    // sendFile may fail on some devices
+    try {
+        return Os.sendfile(to, from, Int64Ref(0), Long.MAX_VALUE)
+    } catch (e: Exception) {
+        Log.e("sendFile", "failed", e)
     }
     return FileInputStream(from).use { src ->
         FileOutputStream(to).use { dst ->

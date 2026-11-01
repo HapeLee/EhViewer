@@ -32,9 +32,6 @@
 
     <!-- shadow -->
 
-    <!-- Gallery Activity -->
-    <color name="gallery_slider_background">@color/grey_900</color>
-
     <!-- Lock pattern view -->
     <color name="lock_pattern_view_regular_color">#8affffff</color>
 

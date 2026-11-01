@@ -20,6 +20,7 @@ import com.hippo.ehviewer.client.data.ListUrlBuilder
 import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.serializer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -41,6 +42,7 @@ class EhRouteCodecTest {
             EhRoute.GalleryComments(gid = 42L, apiUid = 777L, apiKey = "abc", token = "t"),
             EhRoute.GalleryPreviews(gid = 42L, scrollTo = -1),
             EhRoute.Progress(gid = 42L, pToken = "pt", page = 7),
+            EhRoute.Reader(gid = 42L, token = "t", page = 7, source = ReaderSource.DOWNLOAD),
             EhRoute.GalleryList(
                 GalleryQuery(
                     mode = ListUrlBuilder.MODE_TAG,
@@ -64,7 +66,7 @@ class EhRouteCodecTest {
         val queries = listOf(
             GalleryQuery(),
             GalleryQuery(
-                action = GalleryListSceneAction.HOMEPAGE,
+                action = LIST_ACTION_HOMEPAGE,
                 mode = ListUrlBuilder.MODE_SUBSCRIPTION,
             ),
             GalleryQuery(
@@ -89,7 +91,7 @@ class EhRouteCodecTest {
             ),
         )
         for (query in queries) {
-            val expected = query.copy(action = GalleryListSceneAction.LIST_URL_BUILDER)
+            val expected = query.copy(action = LIST_ACTION_LIST_URL_BUILDER)
             assertEquals(expected, galleryQueryOf(query.toListUrlBuilder()))
         }
     }
@@ -112,14 +114,31 @@ class EhRouteCodecTest {
     fun `gid is only exposed for routes that point at a gallery`() {
         assertEquals(42L, gidOf(EhRoute.GalleryDetail(gid = 42L)))
         assertEquals(42L, gidOf(EhRoute.GalleryComments(gid = 42L)))
+        assertEquals(42L, gidOf(EhRoute.Reader(gid = 42L)))
         assertNull(gidOf(EhRoute.GalleryDetail()))
         assertNull(gidOf(EhRoute.SignIn()))
         assertNull(gidOf(EhRoute.GalleryList()))
     }
-}
 
-/** 和 `GalleryListScene` 的常量保持一致；放在测试里避免把 Scene 拖进 JVM 单测 */
-private object GalleryListSceneAction {
-    const val HOMEPAGE = "action_homepage"
-    const val LIST_URL_BUILDER = "action_list_url_builder"
+    @Test
+    fun `archive reader keeps its uri in the route`() {
+        val reader = EhRoute.Reader(uri = "content://media/picker/42", source = ReaderSource.ARCHIVE)
+        assertEquals(reader, roundTrip(reader))
+        assertEquals(ReaderSource.ARCHIVE, reader.source)
+        // 压缩包没有 gid/token，别拿 -1 当画廊用
+        assertNull(gidOf(reader))
+    }
+
+    @Test
+    fun `reader is a gallery page without drawer and without start page by default`() {
+        val reader = EhRoute.Reader()
+        assertEquals(-1, reader.page)
+        assertEquals(ReaderSource.ONLINE, reader.source)
+        assertNull(gidOf(reader))
+
+        // 阅读器占用整屏：抽屉要锁掉，否则翻页手势会被它抢走
+        assertFalse(reader.hasLeftDrawer)
+        assertFalse(isSolidRoute(reader))
+        assertNull(targetOf(reader))
+    }
 }

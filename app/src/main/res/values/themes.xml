@@ -24,7 +24,7 @@
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
         <item name="android:colorBackground">@color/colorBackground</item>
-        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="s">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
 
         <item name="dividerColor">@color/divider</item>
         <item name="toolbarColor">@color/colorPrimary</item>
@@ -65,10 +65,10 @@
         <item name="colorAccent">@color/colorPrimary</item>
         <item name="colorControlActivated">@color/colorPrimary</item>
         <item name="android:colorBackground">@color/grey_850</item>
-        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
 
         <!-- Non-overhead workaround for ROMs enable it by default, MIUI etc. -->
-        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+        <item name="android:forceDarkAllowed">false</item>
 
         <item name="dividerColor">@color/divider</item>
         <item name="toolbarColor">?android:attr/colorBackground</item>
@@ -136,40 +136,19 @@
         <item name="galleryDetailDivider">@drawable/divider_gallery_detail_dark</item>
     </style>
 
-    <style name="AppTheme.Gallery" parent="AppTheme">
-        <item name="gallerySliderBackgroundColor">@color/gallery_slider_background</item>
-    </style>
-
     <!-- ============ -->
     <!-- Widget Theme -->
     <!-- ============ -->
-    <style name="CommentEditText" parent="ThemeOverlay.MaterialComponents">
-        <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="colorAccent">@android:color/white</item>
-    </style>
-
     <style name="RatingBarTheme" parent="ThemeOverlay.MaterialComponents">
         <item name="colorControlNormal">@color/yellow_800</item>
         <item name="colorControlActivated">@color/yellow_800</item>
     </style>
 
     <style name="Widget.FloatingActionButton" parent="Widget.MaterialComponents.FloatingActionButton">
-        <item name="android:outlineAmbientShadowColor" tools:targetApi="28">?attr/widgetColorThemePrimary</item>
-        <item name="android:outlineSpotShadowColor" tools:targetApi="28">?attr/widgetColorThemePrimary</item>
+        <item name="android:outlineAmbientShadowColor">?attr/widgetColorThemePrimary</item>
+        <item name="android:outlineSpotShadowColor">?attr/widgetColorThemePrimary</item>
         <item name="backgroundTint">?attr/widgetColorThemePrimary</item>
         <item name="tint">#fff</item>
-    </style>
-
-    <style name="Widget.FloatingActionButton.Accent" parent="Widget.MaterialComponents.FloatingActionButton">
-        <item name="android:outlineAmbientShadowColor" tools:targetApi="28">?attr/widgetColorThemeAccent</item>
-        <item name="android:outlineSpotShadowColor" tools:targetApi="28">?attr/widgetColorThemeAccent</item>
-        <item name="backgroundTint">?attr/widgetColorThemeAccent</item>
-        <item name="tint">#fff</item>
-    </style>
-
-    <style name="Widget.FloatingActionButton.Accent.Mini" parent="Widget.FloatingActionButton.Accent">
-        <item name="fabSize">mini</item>
     </style>
 
     <style name="FixedLineHeightEditText" parent="Widget.AppCompat.EditText">

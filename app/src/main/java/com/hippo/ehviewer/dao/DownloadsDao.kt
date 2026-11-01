@@ -22,6 +22,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 
 @Dao
 interface DownloadsDao : BasicDao<DownloadInfo> {
@@ -39,6 +40,10 @@ interface DownloadsDao : BasicDao<DownloadInfo> {
 
     @Insert
     override fun insert(t: DownloadInfo): Long
+
+    /** 按主键 GID 做「存在即更新、不存在即插入」，语句本身是原子的 */
+    @Upsert
+    fun upsert(downloadInfo: DownloadInfo)
 
     @Delete
     fun delete(downloadInfo: DownloadInfo)

@@ -21,6 +21,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 
 @Dao
 interface DownloadDirnameDao : BasicDao<DownloadDirname> {
@@ -32,6 +33,10 @@ interface DownloadDirnameDao : BasicDao<DownloadDirname> {
 
     @Insert
     override fun insert(t: DownloadDirname): Long
+
+    /** 按主键 GID 做「存在即更新、不存在即插入」，语句本身是原子的 */
+    @Upsert
+    fun upsert(downloadDirname: DownloadDirname)
 
     @Query("DELETE FROM DOWNLOAD_DIRNAME WHERE GID = :gid")
     fun deleteByKey(gid: Long)

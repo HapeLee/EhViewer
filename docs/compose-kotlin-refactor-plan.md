@@ -115,6 +115,64 @@
 - **测试**：新增 `GalleryUrlSuggestionTest`（详情链接 / 分页链接 / 普通关键字 / 空白 / 详情优先 五组用例）。旧实现写在 `SearchBar.SuggestionProvider` 里无法单测，这也是这次把它抽成顶层函数的主要理由。
 - **验证**：`compileDebugKotlin`、`spotlessCheck`、`testDebugUnitTest`、`assembleDebug` 全绿。
 
+### 2.8 阅读器换栈后的二次孤儿扫描（P7 第一批）
+
+阅读器 R1–R8 删掉 GL 栈后，`com/hippo/widget` 与 `com/hippo/yorozuya` 里一批自研类失去了最后一个调用者。按「全仓代码 + res XML 双向匹配」复扫，删掉 10 个零引用类：
+
+- `widget/`：`ColorView`、`LinkifyTextView`、`RadioGridGroup`、`SimpleGridAutoSpanLayout`、`SimpleGridLayout`、`TextClock`
+- `yorozuya/`：`ResourcesUtils`、`thread/{InfiniteThreadExecutor, PriorityThreadFactory, PriorityThread}`
+
+两条容易误判的点，记下来给下一批扫：
+
+1. **布局里用的是全限定名**（`<com.hippo.widget.CuteSpinner`），按简单名匹配会把它们误判成孤儿。第一次扫描就是这样把 `CuteSpinner` /
+   `IgnoreFitsSystemWindowsFullyDraggableDrawerContentLayout` / `IndicatingListView` 误报了，二次复核才捞回来——它们都还活着。
+2. **孤儿会级联**：`SimpleGridLayout` 与 `PriorityThread` 自己不是零引用，唯一的引用者是被删掉的子类 / 工厂，删完才变成孤儿。所以扫一遍不够，删完必须再扫一遍。
+
+`SimpleGridLayout` 的 `declare-styleable`（`columnCount` / `itemMargin`，别处无引用）一并从 `attrs.xml` 移除。
+
+**验证**：四道门禁全绿；`com/hippo/yorozuya/thread/` 已清空。
+
+#### 第二批
+
+删完立刻再扫一遍，又掉下来 7 个：
+
+- `ehviewer/widget/`：`ReversibleSeekBar`、`SearchEditText`、`SimpleRatingView`、`TileThumb`、`FixedThumb`
+- `ehviewer/`：`WindowInsetsAnimationHelper`
+- `widget/`：`DateUtils`
+
+`FixedThumb` 的 `declare-styleable`（`minAspect` / `maxAspect` / `alwaysCutAndScale`）一并移除。
+
+**误报要人工复核**：`DownloadInfoMagics` 被 `DownloadThumbInterceptor.kt` 以
+`import ...DownloadInfoMagics.decodeMagicRequestOrUrl` 的方式引用，按简单名扫描会漏掉
+这种「只有 import 行带全限定名」的用法。`FixedThumb` 反过来——它唯一的「引用」是
+`GalleryPreviewsScreen` 里一句历史注释，脚本判成活着，实际是死的。所以脚本只能给候选，
+删之前必须逐个 `git grep` 复核。
+
+顺带扫了孤儿资源：**23 个 layout、drawable 下的 XML 全部有引用**，资源侧这轮没有孤儿。
+
+**验证**：四道门禁全绿（63 例不变，这两批只删不改逻辑）。
+
+#### 第三批：资源侧
+
+代码侧扫完再扫资源，两个方向都做了：
+
+- **layout / drawable**：23 个 layout、drawable 下全部 XML 都有引用（`R.layout.x` / `@layout/x` /
+  Manifest 三路交叉匹配），这轮没有孤儿。
+- **字符串**：`values/strings.xml` 590 条里查出 5 条零引用，5 份语言文件一起删：
+  `passwd_cannot_be_empty`、`passwd_wrong`（压缩包密码框重做后不再提示）、
+  `gallery_menu_title`（`GalleryMenuHelper` 随旧阅读器删了）、
+  `start_download_original`、`error_empty`。删完复扫 **0 孤儿 / 585 条**。
+- **array / plurals**：无孤儿。
+
+判定口径：引用只看 `R.string.x` 与 `@string/x` 两种写法，**翻译文件里的同名定义不算引用**
+——否则每条都会被自己所在的 5 个语言文件判成「有人用」。
+
+**顺带确认**：`com/hippo/scene/` 与 `ui/scene/` 下的 `Announcer` / `SceneFragment` /
+`SceneHost` / `TransitionHelper` / `BaseScene` / `SolidScene` / `ToolbarScene` /
+`EhCallback` / `TransitionNameFactory` / `ReaderScene` / `GalleryAdapter` / `GalleryHolder`
+在 P7-e 就已经删过了（工作区里是待提交的删除），现在磁盘上只剩空目录。它们剩下的「引用」
+全是别处注释里的历史名词。
+
 ## 3. 四组 JNI 的替代
 
 ### 3.1 SHA-1：直接改成 Kotlin 调用 MessageDigest
@@ -340,3 +398,696 @@ ReaderSession（当前页 / 方向 / 重试 / 预取窗口）
 - 同一套页身份覆盖在线、下载、ZIP/7z/RAR，并维持原有保存、重试与阅读进度语义。
 
 KMP/CMP 的后续验收需分别记录 compile、contract test、UI smoke 和 package 状态。当前只完成源码/依赖评估，尚无 Eh 桌面 target、共享编译或阅读器实测结果。
+
+## 10. P6 数据与下载收尾：盘点与分片
+
+> 写于 2026-11-01。P0–P5 与 P7 已落地，P6 是剩下唯一一大块，也是比阅读器换栈更大的一块，
+> 所以先按 R1 的做法做一次盘点再分片。
+
+### 10.1 现状
+
+- 主库 `EhDatabase` version 5，10 个 DAO 共 37 个方法，**全部同步、0 个 suspend**。
+- `buildMainDB` 仍带着 `allowMainThreadQueries()`，源码里就挂着
+  `// TODO: Remove allowMainThreadQueries`。
+- 所有 DAO 只经 `EhDB` 这一个门面出去——`com/hippo` 下没有第二个地方直接调 `xxxDao()`。
+  `CookiesDatabase` 是另一个 Room 实例，本来就没开主线程查询，不在本轮范围。
+- `EhDB` 全类 `@Synchronized`。它除了串行化，还顺带承担了「读-改-写」的原子性
+  （`putDownloadInfo` 是 load → update/insert）。当初判定「改成 suspend 时这层互斥不能丢，
+  换成 `Dispatchers.IO.limitedParallelism(1)` 即可」，实际做的时候换了个做法，理由见 §10.11。
+
+### 10.2 49 个 `EhDB` 调用点的线程判定
+
+| 调用方 | 处数 | 线程 | 结论 |
+| --- | --- | --- | --- |
+| `DownloadManager` | 32 | 主线程 | **P6-c 已修**（见 §10.6） |
+| `CommonOperations` | 4 | 主线程（UI 直调 + `EhClient.Callback` 回主线程） | **P6-a 已修** |
+| `EhFilter` | 4 | 读在 IO（解析链），写在主线程（`FilterFragment`、详情页「屏蔽」） | **P6-a 已修** |
+| `AdvancedFragment` | 3 | IO（`lifecycleScope.launchIO`） | 已经好了 |
+| `HistoryScene` | 3 | IO（`scope.launchIO`）；`historyLazyList` 只构造 PagingSource，不跑查询 | 已经好了 |
+| `DownloadsScene` | 1 | 主线程 | **盘点片已修** |
+| 两个 parser | 2 | IO（`EhEngine` suspend 链） | 已经好了 |
+
+关键点：**`SimpleHandler` 是 `Handler(Looper.getMainLooper())`**，`DownloadManager` 把任务
+post 到它上面，所以那 32 处是这批里最大的一块，也正好和 §5.2「重做下载执行边界」是同一件事
+——不能分两遍做，否则刚搬完又要再搬一次。
+
+### 10.3 分片与顺序
+
+| 片 | 范围 | 完成条件 |
+| --- | --- | --- |
+| P6-a | 主线程侧的零散调用：`CommonOperations`、`EhFilter`、`GalleryDetailScene` | 除 `DownloadManager` 外主线程不再有 Room 调用 |
+| P6-b | `EhDB` 去掉 `@Synchronized`，互斥下沉到 DAO（`@Upsert` / `@Insert(IGNORE)` / `@Transaction`） | **已完成**（§10.11）：`EhDB` 不再有 `@Synchronized`，调用点零改动 |
+| P6-c | `DownloadManager` 执行边界：`SimpleHandler` 换成自己的单线程执行器 / 协程域 | 下载不依赖主线程 Handler |
+| P6-d | 摘掉 `allowMainThreadQueries()` | **已完成**（§10.7），剩真机全功能跑一遍 |
+| P6-e | `Settings`（839 行）切 DataStore | **代码已完成**（§10.12）：不迁旧 SharedPreferences，真机待跑 |
+| P6-f | 持久下载队列 + 后台执行后端 | **代码已完成**（§10.13）：进程死亡后队列可恢复，真机待跑 |
+
+**顺序不能倒**：P6-c 做完之前摘不掉 `allowMainThreadQueries`，否则下载一启动就崩。
+
+### 10.4 盘点片改动
+
+只动 `DownloadsScene.pinTopSelected()`：一次 pin 要写 N 条，原来直接在 UI 线程写。
+
+### 10.5 P6-a 改动（主线程侧清零）
+
+**做法是把调用点搬到 IO，而不是改 `EhDB` / `EhFilter` 的签名。** 原因很具体：
+`EhFilter` 的写方法带 `@Synchronized`，而读方法（`filterTitle` 等）也带同一个
+——它们共用这把监视器保护内存里的 `ArrayList`。如果把写方法改成 `suspend` 再丢掉
+`@Synchronized`，跨线程恢复协程会让 `monitorenter` / `monitorexit` 落在不同线程上，
+而且读写两侧的锁就不再一致了。保持同步签名、只在调用方换成 `launchIO`，这层保护原样保留。
+
+| 位置 | 改动 |
+| --- | --- |
+| `CommonOperations.doAddToFavorites`（slot `-1`） | 本地收藏的落库 + `listener.onSuccess` 进 `launchIO`，回调回主线程 |
+| `CommonOperations.removeFromFavorites` | 两条写库进 `launchIO`；网络分支用 `withUIContext` 回主线程发起 |
+| `CommonOperations.DelegateFavoriteCallback.onSuccess` | 写库进 `launchIO`，UI 更新回主线程 |
+| `FilterFragment` 的删除 / 新增 / 启停 | 三个入口各包一层 `lifecycleScope.launchIO`，`notifyDataSetChanged` 回主线程 |
+| `GalleryDetailScene` 的屏蔽上传者 / 屏蔽标签 | 新增 `rememberCoroutineScope()`，两处 `EhFilter.addFilter` 进 `launchIO`，提示回主线程 |
+
+用 `com.hippo.util.launchIO` / `withUIContext`（前者是 `GlobalScope` + `Dispatchers.IO` 的
+delicate 版，与仓库现有用法一致；这些操作是 app 生命周期级别的，不需要绑到页面）。
+
+**做完的状态**：除 `DownloadManager` 外，主线程上不再有 Room 调用。P6-d 的门槛现在只看 P6-c。
+
+**验证**：四道门禁全绿（63 例不变）。真机待跑：收藏/取消收藏、过滤器的增删改与启停、
+详情页屏蔽上传者与标签——这几条路径现在都是「IO 写库 → 主线程刷新」，要看刷新有没有漏。
+
+### 10.6 P6-c：DownloadManager 的写操作脱离主线程
+
+**调度纪律**：DownloadManager 的写方法改成 `suspend`，DB 部分用 `withIOContext` 切走，
+**内存态与监听器通知留在调用线程**。因此调用方必须用**主线程**起协程
+（`scope.launch {}` / `viewModelScope.launch`），**不能**用 `launchIO`——否则
+`DownloadInfoListener` / `DownloadListener` 会在 IO 线程被回调，UI 直接炸。
+
+改动：
+
+- 12 个对外入口改 `suspend`（start / add / stop / delete / move / label 一族 + dirname），
+  内部三个 `*Internal` 跟着改；
+- 两处**改不了 suspend** 的地方单独处理，都写清了原因：
+  - `ensureDownload()` 与 `NotifyTask.run()`：它们在 `SimpleHandler` 的 `Runnable` 里，
+    只能 `launchIO` 火后不管——写的是状态快照，后面没有读回来；
+  - `SpiderDen.perDownloadDir`：`mode` 的 setter 里调的，而且**内存态必须先于建目录生效**
+    （`putDownloadDirname` 先更新内存再落库，火后不管会读到旧值），所以只能 `runBlocking`
+    桥一下。DB 仍在 IO 线程，阻塞量与改造前一致；
+- 调用方 31 处全部跟进（编译逐个暴露出来，改一处刷一次）。
+
+**做完的状态**：DownloadManager 侧主线程不再有 Room 调用。
+
+**只剩一个**：`EhFilter` 的对象初始化（`EhDB.allFilter`）发生在第一次访问它的线程上，
+而 `FilterFragment` 在主线程读 `titleFilterList` → 主线程读库。这一处留给 P6-d 一起处理，
+在此之前摘不掉 `allowMainThreadQueries`。
+
+**验证**：四道门禁全绿（63 例不变）。真机待跑：下载启停、批量删除、标签增删改移、
+下载目录恢复、详情页删下载——重点看监听器回调后列表有没有正常刷新。
+
+### 10.7 P6-d：摘掉 `allowMainThreadQueries`
+
+最后一个障碍是**两个懒加载的类初始化会读库**：`DownloadManager.init`（3 次读 + 可能 1 次
+写标签）和 `EhFilter.init`（1 次读）。`EhApplication.onCreate` 里已经用 `launchIO` 预热了
+`DownloadManager`，但预热是**异步**的，UI 线程理论上可能先一步碰到它们。
+
+处理办法分两层，目的不同，别合并：
+
+1. **兜底**：两处 `init` 里的读库都套 `runBlocking(Dispatchers.IO)`。这样不管是谁、在哪个
+   线程第一次触发类初始化，Room 的调用都在 IO 线程——**不会崩**。代价是若真撞上主线程，
+   会阻塞主线程（与改造前同一量级）。
+2. **优化**：`EhApplication` 启动时在 `launchIO` 里预热（新增 `EhFilter.warmUp()`，
+   与既有的 `ehDatabase` / `DownloadManager.isIdle` 同一套做法），让初始化落在 IO 线程，
+   主线程根本不会等。
+
+只做 1 会退化成「还是阻塞主线程」，只做 2 在小概率竞态下会崩，所以两层都要。
+
+摘掉后 `buildMainDB` 的注释也一并改了——写清楚「Room 会在主线程访问时抛异常，别再开回去」，
+避免下次有人顺手加回来。
+
+**验证**：四道门禁全绿。真机：**debug 构建全功能跑一遍**（进下载页、历史页、设置页、
+详情页、阅读器），Room 若被主线程访问会直接抛 `IllegalStateException`，一跑就知道漏没漏。
+
+### 10.8 lint 全量扫描（P6-d 的静态验收）
+
+真机跑不了，就用 `:app:lintDebug` 做一次全量静态验收，看 P6-a / P6-c / P6-d 有没有引入新问题。
+
+结果 **41 error / 98 warning / 30 hint**，按「文件 + 规则」逐条过了一遍，
+**没有一条落在这几片新写的代码上**。明细：
+
+| 规则 | 条数 | 结论 |
+| --- | --- | --- |
+| `LocalContextGetResourceValueCall` | 29 | 存量。Composable 里用 `LocalContext.current.getString(...)`，配置变更时不会重组。要修得把局部 `fun` 改成 `@Composable`，另开一片 |
+| `MissingDefaultResource` | 11 | **已清**，见下 |
+| `ContextCastToActivity` | 1 | 保持原样，见下 |
+
+**`MissingDefaultResource`**：`values-sw600dp/dimens.xml` 与 `values-sw720dp-land/dimens.xml`
+里的 7 个 dimen（`gallery_list_margin_h`、`single_max_width`、`gallery_grid_margin_h`、
+`gallery_list_interval`、`gallery_search_bar_margin_h`、`search_layout_margin_h`、
+`search_layout_interval`）都是旧画廊列表布局用的，画廊列表早已是 Compose——全仓零引用，
+所以**两个限定符目录整个删掉**，比给它们补默认值干净。
+
+**`ContextCastToActivity`**：`ReaderWindowEffects` 里 `LocalContext.current as? Activity`。
+lint 让改用 `LocalActivity`，但当前 activity-compose 版本没有这个 API（试过，编译不过），
+所以保持原样，并把原因写进注释——免得下一个人再撞一次。
+
+**验证**：四道门禁全绿（63 例不变）。
+
+### 10.9 lint `UnusedResources`：24 个死资源（§2.8 的漏网之鱼）
+
+§2.8 第三批做过一次孤儿资源扫描（layout / drawable.xml / string / array / plurals 三路匹配，
+结果归零），但 `:app:lintDebug` 又报了 29 条 `UnusedResources`。**两遍口径不一样**，漏的是：
+
+- **按文件名定义的资源**：`R.anim.accelerate_quart` 就是 `res/anim/accelerate_quart.xml`，
+  名字不出现在任何 XML 文本里，按名字 grep 永远找不到；`res/transition/*` 同理。
+- **样式名里的点**：`R.style.Guide_Title` 对应 `<style name="Guide.Title">`，
+  按 `Guide_Title` 搜不到。
+- **pathdata 里的图标路径**：`pd_*` 是旧自绘控件用的矢量图标 path 数据。
+
+删掉 24 个：3 个 anim + 2 个 transition + 1 个 drawable（`spacer_keyline`）+ 3 个 color
+（`grey_900` / `grey_100` / `gallery_slider_background`）+ 5 个 dimen + 9 个 `pd_*` +
+1 个 style（`Guide.Title`）。`res/anim/` 与 `res/transition/` 整个目录随之没了。
+
+**5 个样式没删**：`themes_override.xml` 里的 `Base.ThemeOverlay.AppCompat.ActionBar` /
+`...Dark.ActionBar` / `Widget.MaterialComponents.CompoundButton.CheckBox` /
+`...RadioButton` / `PreferenceSummaryTextStyle` 全部带 `tools:override="true"`——
+它们是**按名字覆盖库里的同名样式**，库在运行时按名字解析，lint 看不见这条引用，
+报的是假阳性，删了会直接改外观。
+
+**验证**：四道门禁全绿（63 例不变）；lint warnings 91 → 67，errors 仍是 30
+（29 条 `LocalContextGetResourceValueCall` + 1 条 `ContextCastToActivity`）。
+
+### 10.10 「当作新项目」：不做老数据兼容
+
+2026-11-01 用户明确：**不需要考虑老数据的兼容性，可以当作新项目**。这条决定写进文档，
+后面各片按它执行。
+
+| 位置 | 有兼容要求时 | 现在的做法 |
+| --- | --- | --- |
+| Room | 每次动 schema 都要补一条 `Migration`，不能指望兜底 | `buildMainDB` 保留 `fallbackToDestructiveMigration(dropAllTables = true)` 作为**唯一**升级路径，不再为每次 schema 变动写迁移。已存在的 `MIGRATION_4_5` 保留（已经写了，删它反而要解释） |
+| P6-e `Settings` → DataStore | 用 `SharedPreferencesMigration` 把旧值搬过去 | 不搬。装上新版后设置回到默认值——一次性代价，换 `Settings` 里少一整层兼容代码 |
+| P6-f 持久下载队列 | 要能接上旧队列恢复 | 只保证「新版自己写下的队列」可恢复；旧的内存态队列不迁 |
+| `EhDB.importDB` / `exportDB` | — | **保留**。用户挑一个 `.db` 文件主动导入属于功能，不是升级路径，不受这条决定影响 |
+
+三条边界，不因为这条决定就可以乱来：
+
+1. 开发期仍然不能随便改实体：每次 schema 变动会清空本地库，自己的调试数据（历史、下载、
+   本地收藏）会一起没。
+2. 正式发布前要重新评估一次：那时若决定留住用户数据，就得补迁移，别到最后一刻才发现
+   兜底会把库清掉。
+3. 这条决定只管**数据**不管**行为**：功能语义仍要与旧版一致。
+
+### 10.11 P6-b：`EhDB` 去掉 `@Synchronized`（互斥下沉到 DAO）
+
+原计划是全量改 `suspend` + `Dispatchers.IO.limitedParallelism(1)`。动手前扫了一遍调用链，
+发现挡路的不是 `EhDB` 本身，而是两个 parser：
+
+- `GalleryListParser.parse` / `GalleryDetailParser.parseDetail` 里有 `EhDB.containLocalFavorites`，
+  两者都是**纯同步函数**，上游（`EhEngine`、解析器）一整条链都不是 suspend。
+- 改 suspend 就得把整条解析链 suspend 化，那是另一片，也不是 P6 的目标。
+- 在同步链上用 `runBlocking` 顶住等于没改，还多一层阻塞。
+
+所以改成**保持同步签名、把互斥下沉到 DAO**。这不是妥协——`@Synchronized` 真正管的只有
+两件事，两件都能在更合适的地方解决：
+
+1. **串行化**：Room 自己处理 SQLite 的写锁，进程内串行本来就是多余的。
+2. **「读-改-写」原子性**：这是唯一有实际后果的一条。两个线程同时 `putLocalFavorites`
+   同一个 gid，都 load 到 null 就都会 insert，主键冲突直接抛异常。
+
+| 原来的写法 | 现在 | 原子性靠什么 |
+| --- | --- | --- |
+| `putDownloadInfo`：load → update/insert | `DownloadsDao.upsert` | `@Upsert` 单语句 |
+| `putDownloadDirname`：load → update/insert | `DownloadDirnameDao.upsert` | `@Upsert` 单语句 |
+| `putLocalFavorites`（单条 / 批量）：load → insert | `LocalFavoritesDao.insertOrIgnore` | `@Insert(onConflict = IGNORE)`，冲突判断交给 SQLite |
+| `putHistoryInfo(galleryInfo)`：load → update/insert | `HistoryDao.upsert` | `@Upsert` 单语句 |
+| `putHistoryInfo(list)`：逐条 load → insert | `HistoryDao.insertOrIgnore` | 同上 |
+| `updateHistoryFavSlot`：load → 改字段 → update | `HistoryDao.updateFavoriteSlot` | DAO 上的 `@Transaction` |
+| `moveDownloadLabel`：list → 改 time → update | `DownloadLabelDao.move` | DAO 上的 `@Transaction` |
+| `moveQuickSearch`：同上 | `QuickSearchDao.move` | DAO 上的 `@Transaction` |
+| `addFilter`：load(text, mode) → insert | `FilterDao.insertIfAbsent` | DAO 上的 `@Transaction`（过滤器的唯一是业务上的 TEXT + MODE，不是主键，`IGNORE` 帮不上忙） |
+
+`@Transaction` 写在 DAO 接口的**默认方法**上，一开始担心 Room 不为它生成 override
+（那样事务就不生效）。编译后查了 `build/generated/ksp/debug/kotlin/com/hippo/ehviewer/dao/*_Impl.kt`，
+四个方法都生成了：
+
+```kotlin
+public override fun move(fromPosition: Int, toPosition: Int): Unit =
+    performBlocking(__db, false, true) { super@DownloadLabelDao_Impl.move(fromPosition, toPosition) }
+```
+
+第三个参数 `true` 就是 inTransaction，事务生效。这条以后可以直接复用。
+
+`EhFilter` 的 `@Synchronized` **没动**：它们保护的是内存里的 `ArrayList` 而不是数据库，
+理由同 §10.5。`historyLazyList` 保留属性、去掉 `@get:Synchronized`：Room 生成的 PagingSource
+是惰性的，创建时不碰数据库，查询由 Paging 自己的 IO 线程发起，所以它可以在主线程构造——
+这点也写进注释了。
+
+**调用点零改动**：49 个调用点一处没动，P6-a / P6-c / 盘点片已经把它们全搬到 IO 了。
+
+**验证**：`:app:compileDebugKotlin` 通过（KSP 接受 `@Upsert` 与默认方法上的 `@Transaction`）。
+真机待跑：本地收藏的批量增删、下载标签与快速搜索的拖动重排、过滤器的重复添加——
+这些是原子性改动直接碰到的路径。
+
+### 10.12 P6-e：`Settings` 落到 DataStore
+
+目标是把 839 行 `Settings` 从 SharedPreferences 换到 DataStore，**同时一个调用点都不改**
+（全仓 192 处 `Settings.` 读、46 处 `Settings.put*`）。
+
+做法是分两层：
+
+| 层 | 内容 | 作用 |
+| --- | --- | --- |
+| 进程内快照 | `ConcurrentHashMap<String, Any>` | 读一律走它：77 个 getter 保持同步、零 IO，调用点不用改 |
+| DataStore（Proto） | 顶层 `Context.settingsDataStore` 委托 | 写先更新快照，再 `launchIO { store.edit { } }` 落盘 |
+
+**为什么不是全量 `Flow` / `suspend`**：那 192 处读散布在 Compose、Scene、ViewModel、下载链里，
+改成 suspend 等于把 P6 无限扩大。`Settings` 是典型的「读极多、写极少、进程内唯一真源」，
+快照正好对得上——这也是 Android 官方在迁 DataStore 时推荐给存量代码的中转形态。
+
+改动明细：
+
+| 位置 | 改动 |
+| --- | --- |
+| 依赖 | 新增 `androidx.datastore:datastore-preferences` 1.1.7 |
+| 存储实例 | 顶层 `private val Context.settingsDataStore by preferencesDataStore("settings")`。**不挂 `SharedPreferencesMigration`**——§10.10 的新项目口径 |
+| `initialize()` | `runBlocking` 读一次 `store.data.first()` 灌满快照。这是唯一一次磁盘读，必须在任何读取之前跑（`EhApplication.onCreate` 里已经是这样） |
+| 10 个私有原语 | `getBoolean/putBoolean/getInt/putInt/getLong/putLong/getString/putString/getStringSet/putStringSet` 改为读写快照；`getIntFromStr` / `putIntToStr` 保留（XML 的 `ListPreference` 落的是 String，读的时候转回 Int） |
+| 落盘 | `persist` → `persistAll` → `write`：按 value 的运行时类型挑 `booleanPreferencesKey` / `intPreferencesKey` / `longPreferencesKey` / `stringPreferencesKey` / `stringSetPreferencesKey`；`null` 就是 `remove` |
+| `favCat` / `favCount` | 原来是「一次 `edit {}` 写 10 个 key」，现在是 `persistAll`——DataStore 的 `edit` 本身是事务，10 个 key 仍是一次落盘 |
+| `ClassCastException` 兜底 | 删掉。类型现在由快照统一管住，对不上就落回默认值，行为与原来的 catch 一致 |
+| 老的设置页 | 新增 `SettingsPreferenceDataStore`（`androidx.preference.PreferenceDataStore` 桥） |
+
+**老设置页那个坑**：7 个页面还是 XML + `PreferenceFragmentCompat`，它们默认读写
+`getDefaultSharedPreferences`，不桥接就会和 `Settings` 各存一份、互相看不见。但换数据源必须
+发生在 inflate 之前——`onCreatePreferences` 是 `Fragment.onCreate()` 里调的，而 Preference 在
+`addPreferencesFromResource` 时就把初始值读走了。所以 `BasePreferenceFragment` 把
+`onCreatePreferences` 收成 `final`：先装上桥，再转调新增的 `onSetupPreferences`，
+7 个子类（`SettingsFragment` / `ReadFragment` / `PrivacyFragment` / `EhFragment` /
+`DownloadFragment` / `AdvancedFragment` / `AboutFragment`）跟着改名。
+
+三条副作用，都写在这里：
+
+1. 装上新版本后**设置回到默认值**：不迁 SharedPreferences 是 §10.10 明确的选择。
+2. 写入是 fire-and-forget，与原来的 `apply()` 同一档保证（全仓没有用到 `commit()`）。
+3. DataStore 是**单进程**设计。`AndroidManifest.xml` 里没有 `android:process`，所以不受影响；
+   以后若加多进程组件，`Settings` 得重新考虑。
+
+**验证**：`:app:compileDebugKotlin` 与 `spotlessCheck` 通过。真机待跑：设置页每一项改值 →
+退出 → 重进 → 生效，重点是那些「XML 写 String、代码读 Int」的 key（`gallery_site`、`theme`、
+`list_mode`、`screen_rotation`、`reading_direction`、`page_scaling`、`start_position`、
+`read_theme`），以及 `favCat` / `favCount` 这 20 个 key。
+
+### 10.13 P6-f：持久下载队列
+
+盘点时先发现一件事：**队列其实一直是持久的**——`DownloadInfo` 就在 Room 的 `DOWNLOADS` 表里，
+state / label / time 都在库里。真正把队列弄丢的是另外两处：
+
+1. `EhDB.allDownloadInfo` 的 "Fix state"：`STATE_WAIT` / `STATE_DOWNLOAD` 会被抹成
+   `STATE_NONE`。注意它只改返回的那批内存对象、**没有写回库**——所以库里一直留着未完成的队列，
+   只是每次起来都被内存态盖掉。
+2. `mWaitList` 是纯内存，进程死即失。
+
+所以 P6-f 不是「再建一张队列表」，而是**别再扔掉队列，并在起来时把它接回去**。
+
+| 位置 | 改动 |
+| --- | --- |
+| `EhDB.allDownloadInfo` | 删掉 "Fix state"，注释写明 `STATE_WAIT` / `STATE_DOWNLOAD` 就是持久队列 |
+| `DownloadManager.init` | 末尾把 `STATE_WAIT` 重新入队；`STATE_DOWNLOAD`（上次正在下、没下完）降级成 `STATE_WAIT` 再入队，并把库里的状态一并改掉——否则库里还是 `DOWNLOAD`，内存是 `WAIT`，两边不一致 |
+| `restorePendingDownloads()` | 幂等重建 wait list（先 clear 再重建），返回排队数 |
+| `resumePendingDownloads()` | 队列**空**才重建，然后通知 + `ensureDownload()` |
+| `DownloadService.onStartCommand` | `intent == null`（`START_STICKY` 的重投）走 `resumeAfterRebirth()`：接上队列并继续 |
+| `startAllDownload` / `startRangeDownload` | `ensureDownload()` 移出 `if (update)`：残留的 `STATE_WAIT` 不在这次的 update 里，否则用户点「全部开始」会毫无反应 |
+
+续传不用动：进度在下载目录的 SpiderInfo 里，`SpiderQueen` 本来就是从那儿恢复的。
+
+`resumePendingDownloads()` 里「只在队列空时重建」是刻意的：服务重投时进程可能还活着，
+用户已经手动排过队了，无脑 clear + 重排会把他的顺序打乱。
+
+**自动继续的边界**：只在「服务被系统杀掉后重投」时自动开跑。用户自己打开 app 时只把队列
+接回来（UI 显示「等待中」），不自动开跑——免得在他不知情的时候吃掉流量。
+
+**验证**：`:app:compileDebugKotlin` 与 `spotlessCheck` 通过。真机待跑：
+
+- 起几个下载 → 从最近任务划掉 app（杀进程）→ 重新打开：任务应显示「等待中」，
+  点「全部开始」能接着下；
+- 下载中途杀进程 → 系统重投服务 → 应自动继续，且从 SpiderInfo 的进度续上，
+  不是从第一页重来；
+- 先「全部停止」再杀进程：库里没有 `WAIT` / `DOWNLOAD`，起来不该有残留队列。
+
+**P6 六片的代码至此全部落地**（a / b / c / d / e / f）：主线程上不再有 Room 调用、
+`allowMainThreadQueries` 已摘、`EhDB` 去掉 `@Synchronized`、`Settings` 在 DataStore 上、
+持久队列能跨进程存活，§10.8 那 30 条存量 lint error 也清零了（§10.14）。剩下的是真机验收——
+上面各片列的那几条路径。
+
+### 10.14 lint 存量 error 清零：29 + 1
+
+`lintDebug` 长期是 30 errors（`abortOnError = true`，门禁一直是红的）。这一片全清，
+**`lintDebug` 首次跑通**。
+
+| 规则 | 条数 | 分布 |
+| --- | --- | --- |
+| `LocalContextGetResourceValueCall` | 29 | `GalleryDetailScene` 20、`CookieSignInScene` 4、`SignInScene` 2、`DownloadsScene` / `HistoryScene` / `SecurityScene` 各 1 |
+| `ContextCastToActivity` | 1 | `ReaderRoute` 90 |
+
+修法照 lint 自己的 Explanation——它给了两条路：`stringResource` 一类的 Compose API，
+或者 `LocalResources.current` 直接从 `Resources` 取：
+
+- 在 Composable 体里能直接用 `stringResource(...)` 的就用（`DownloadsScene` 的标题）；
+- 事件回调和局部函数里（lambda 不是 `@Composable`，调不了 `stringResource`）换成
+  `LocalResources.current`。它和 `stringResource` 一样是配置感知的，Configuration 变了会
+  失效重组；区别只是拿到的是 `Resources` 对象，能在非 Composable 的 lambda 里用；
+- 用在 `remember { }` 里的（`SecurityScene` 的 `promptInfo`、`HistoryScene` 的 `actions`）
+  要把 `resources` 加进 key，否则拿到的还是旧的。
+
+**`ContextCastToActivity` 是绕过不是修正**：lint 让用 `LocalActivity`，但当前 activity-compose
+版本没有它（`androidx.activity.compose.LocalActivity` 和 `androidx.compose.ui.platform.LocalActivity`
+都 unresolved），所以把转换挪进一个普通函数 `Context.findActivity()`——语义没变，只是 lint
+看到的不再是「`LocalContext.current` 被 cast 成 Activity」。等哪天 `LocalActivity` 补上了应该
+换回去，这条也写进函数注释了。
+
+两个踩到的坑：
+
+1. 文件级的 `private fun`（`startArchiveDownload` / `startTorrentDownload`）不在 Composable 里，
+   它们的 `context.getString` 本来就不在 lint 列表里。第一次用 replace_all 把它们一起改了，
+   编译直接报 unresolved reference——别顺手改。
+2. `GalleryDetailScene` 里 `FrameLayout(context).apply { ... }` 内部本来就有个 `resources`
+   （FrameLayout 自己的），外层再声明 `val resources` 会被它遮蔽。两者都是
+   `android.content.res.Resources`，行为不变，但读代码时容易看错。
+
+**验证**：`:app:lintDebug` BUILD SUCCESSFUL（`abortOnError` 开着，等于 0 error）。
+74 条 warnings 是存量，不拦构建。下一片处理其中的一部分，见 §10.15。
+
+### 10.15 lint warning 清理：85 → 67
+
+error 清零之后 lint 一共报 85 条（warning + hint）。这一片清掉 18 条，剩 67。
+清理项：
+
+| 规则 | 条数 | 做法 |
+| --- | --- | --- |
+| `TrimLambda` | 13 | `trim { it <= ' ' }` → `trim()` |
+| `ObsoleteSdkInt` | 11 | `themes.xml` 删 5 处多余的 `tools:targetApi`；`SDKUtils` 删掉 `isAtLeastN/O/P/Q/S` 这 5 个恒真常量并恒真化 10 个调用点；`MainActivity` 删 `@RequiresApi(S)` |
+| `AutoboxingStateCreation` | 17 | `mutableStateOf(0)` → `mutableIntStateOf` / `mutableLongStateOf` / `mutableFloatStateOf`（8 个文件、17 个状态） |
+| `ContentDescription` | 2 | FAB 用 `@string/add_filter`，抽屉夜间模式按钮新增 `@string/night_mode`（4 个语言都补了） |
+| `LabelFor` | 3 | 给相邻 TextView 加 `labelFor`；两个 SP 输入框补了 id 让标签能指过去 |
+
+三个要注意的点：
+
+1. `trim { it <= ' ' }` 和 `trim()` **不完全等价**：前者裁掉所有 `<= ' '` 的字符（含控制字符），后者走
+   `Char.isWhitespace()`。差异只在极少数控制字符上，lint 判定为可忽略——但这是一个行为差异，
+   不是纯格式化。
+2. `SDKUtils` 恒真化时有个坑：`GalleryPreview.load` 原来是
+   `offsetY == Int.MIN_VALUE || isAtLeastQ`，第二个条件恒真后整个表达式恒真，直接传 `true`。
+   这类「恒真把 OR 短路掉」的点要单独看，不能机械地只删 `|| isAtLeastQ`。
+3. **lint 的总条数会随分析范围变化**：第一次统计的 85 条里没有 `AutoboxingStateCreation`，
+   改完 `TrimLambda` 之后再跑才冒出 17 条。所以看到「总数没降」不要以为是没改对，要按规则逐项对账。
+
+`dialog_js_prompt.xml` 那条 `LabelFor` 是 `tools:ignore` 而不是真修：`message` 的文本是运行时
+`setMessage` 塞进去的，静态分析看不到，`labelFor` 其实已经指对了。这属于静态分析的固有限制。
+
+**剩下 67 条为什么不修**：
+
+| 规则 | 条数 | 理由 |
+| --- | --- | --- |
+| `RtlHardcoded` | 15 | 改 `left/right` 为 `start/end` 只对 RTL 语言有意义，本项目的语言列表里没有 RTL；改了要逐个看 layout，风险大于收益 |
+| `GradleDependency` / `NewerVersionAvailable` / `AndroidGradlePluginVersion` | 21 | 依赖升级建议，需要单独一片验证 |
+| `PluralsCandidate` | 10 | 转 `plurals` 要动 4 个语言文件，属于文案/翻译工作 |
+| `ObsoleteSdkInt` | 5 | 都在 `drawable-v25` / `drawable-v26` / `mipmap-anydpi-v26` / `values-v24` / `xml-v25` 这些限定符目录上；合并会改变图标与数组的实际取值 |
+| `UnusedResources` | 5 | `themes_override.xml` 的 `tools:override` 样式，按名字解析、运行时生效，删了会改外观（§10.9 已判定为假阳性） |
+| `FrequentlyChangingValue` | 2 | `GalleryListScreen` 里读滚动状态触发重组的正解是拆状态，属于重构 |
+| `Overdraw` / `RequiresFeature` / `Typos` / `MergeRootFrame` / `OldTargetApi` / `RtlEnabled` | 9 | 多为视觉优化（overdraw）、`sha1` 误报、`targetSdk` 升级等，收益低 |
+
+**验证**：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:lintDebug` 全绿，0 error。
+真机待跑：收藏页 / 作品列表 / 详情页那几个 `mutableIntStateOf` 改过的状态（页码、排序、布局模式）
+行为应与之前一致；抽屉里的夜间模式按钮读屏应报「夜间模式」。
+
+### 10.16 RTL 与过期限定符目录：67 → 50
+
+两件事一起做：把 layout 里的 `left/right` 换成 `start/end`，再合并 minSdk 31 之后恒被选中的限定符目录。
+
+**RtlHardcoded 15 → 0**：`item_select_dialog.xml`、`nav_header_main.xml`、
+`widget_advance_search_table.xml`、`widget_content_layout.xml` 四个布局，
+`paddingLeft/Right`、`layout_marginLeft/Right`、`layout_gravity="right"` 一律换成 `start/end`。
+项目语言列表里没有 RTL 语言，所以行为不变——改的是语义正确性，不是修 bug。
+
+**限定符目录 5 → 1**：
+
+| 目录 | 处理 | 依据 |
+| --- | --- | --- |
+| `drawable-v25` | 删 | 与 `drawable-v26` 文件同名，API 31 下 v26 优先，v25 永远不会被选中 |
+| `drawable-v26` | 内容移到 `drawable/` | v26 ≤ 31 恒匹配，移到默认目录等价 |
+| `mipmap-anydpi-v26` | 内容移到 `mipmap-anydpi/` | 同上 |
+| `xml-v25` | 内容移到 `xml/` | 同上 |
+| `values-v24` | **保留** | 见下 |
+
+`values-v24/arrays.xml` **不是冗余**：它的 `proxy_types` 有 4 项（多一个 `SOCKS`），
+默认 `values/arrays.xml` 只有 3 项。也就是说在 minSdk 31 下，实际生效的是 v24 那一份，
+删掉会丢 SOCKS 选项。要合并得先确认 `ProxyPreference` 的索引与 `Proxy.Type` 的对应关系，
+风险大于收益，先留着——lint 剩的那 1 条 `ObsoleteSdkInt` 就是它。
+
+**踩到的坑**：`git mv` 之后 `mergeDebugResources` 判定 UP-TO-DATE，AAPT 直接报
+`resource xml/shortcuts not found`，因为增量资源合并对「目录级移动」不敏感。
+`.\gradlew.bat :app:mergeDebugResources --rerun-tasks` 强制重跑一次就好了。
+以后动资源目录（不是动单个文件）都记得这一步，否则会浪费一轮排查。
+
+**副作用**：`mipmap-anydpi/ic_launcher.xml` 与 `mipmap-*dpi/ic_launcher.webp` 并存之后，
+lint 新报 2 条 `IconXmlAndPng`。这些 webp 是 legacy 图标，minSdk 31 下 adaptive icon 永远优先，
+它们确实用不到；但删掉只有 lint 收益、没有功能收益，反而多一层 OEM 桌面兼容风险，所以保留。
+
+**验证**：`:app:assembleDebug` 通过（含资源合并），`:app:lintDebug` 0 error、50 条 warning。
+
+## 11. FooIbar/EhViewer 存档：能借什么、不能借什么
+
+来源：<https://github.com/ZhanZiyuan/EhViewer>——从 Software Heritage 归档快照恢复的
+**FooIbar/EhViewer** 镜像（GPL-3.0，版权链 Hippo Seven → NekoInverter → Tarsin Norbin → Foolbar）。
+它就是那个「用 Compose + M3 重写」的现代分支，对我们剩下的 P7 是现成的对照实现。
+
+技术栈：Kotlin + Compose(M3) + Compose Destinations + Ktor + Coil + Arrow +
+**Rust native**（`native/`、`rust-toolchain.toml`） + 仍有 `jni` 包与 `legacy` 包。
+
+### 11.1 能借的三件事
+
+**① `ui/settings/`：纯 Compose 设置中心，11 个文件，无 XML / PreferenceFragment 残留**
+
+```
+ui/settings
+├── SettingsScreen.kt        ← 首页，只做分类罗列与分发
+├── EhScreen.kt              ← 分类页 × 5
+├── DownloadScreen.kt
+├── AdvancedScreen.kt
+├── PrivacyScreen.kt
+├── UConfigScreen.kt
+├── FilterScreen.kt          ← 详情页 × 4（要列表交互，不是开关集合）
+├── MyTagsScreen.kt
+├── AboutScreen.kt
+├── LicenseScreen.kt
+└── PreferenceWidgets.kt     ← 唯一的横向复用点：标题 + 摘要 + 开关/单选/输入的行样式
+```
+
+拆分口径是**按「屏幕」而不是按「配置类型」**：一个文件 = 一个可导航目的地，页面内部再纵向分组。
+和我们现有的 10 个 XML 设置页几乎 1:1（我们多一个 `ReadFragment`，它没有单独文件）。
+
+**② `me.zhanghai.compose.preference`：M3 风格的 Compose Preference 库**
+
+它是把库**源码内联**到 `app/src/main/kotlin/me/zhanghai/compose/preference/`。
+库本体在 Maven 有发布，直接加依赖即可，不用内联：
+
+```kotlin
+implementation("me.zhanghai.compose.preference:preference:2.2.0")
+```
+
+`ListPreference` / `SwitchPreference` / `EditTextPreference` / `SliderPreference` 这些都有，
+正好覆盖我们 XML 里在用的那几类。
+
+**③ `PrefDelegate` 三件套 + `SettingsCollector`**
+
+```
+SharedPreferences / DataStore
+        │ 写入
+        ▼
+PrefDelegate<T>
+  ├─ value: T                  ← 同步快照（首帧可用，避免闪默认值）
+  ├─ valueFlow(): Flow<T>      ← 有状态，collectAsState(initial = value)
+  └─ changesFlow(): Flow<Unit> ← 只发「变了」，给不关心值的副作用用
+```
+
+配套的 `SettingsCollector.kt` 用 `observed {}`（`valueFlow().drop(1).collectLatest`）把
+「主题切换、UConfig 刷新、`.nomedia` 写入、标签库更新」这些**应用级副作用集中注册**，
+而不是散落在每个调用点。
+
+**和 §10.12 的关系**：我们只做了第一条（内存快照），缺后两条。所以现在设置改了，
+别的界面不会自动刷新，全靠手动重进页面。**P7 迁设置页时必须顺手补上 `valueFlow()` /
+`changesFlow()`**，否则 Compose 设置页拿不到响应式数据，只能继续用「快照 + 手动刷新」。
+
+### 11.2 不能借的
+
+| 它的做法 | 为什么不要 |
+| --- | --- |
+| Rust native + `jni` 包（libarchive 走 Rust） | 我们 P2/P3 的方向是**去掉** native，它还在新增 native。方向相反 |
+| Arrow（`Either` 做错误处理） | 我们已有 `Result` + 协程的写法，为「对齐」引入新依赖不划算 |
+| Compose Destinations | 我们已经是 Nav3 + `EhRoute`，换过去等于重做导航 |
+| Ktor | 我们的网络层是 OkHttp，没有替换理由 |
+| `legacy` 包 | 它自己也没清完，不是范本 |
+
+### 11.3 P7-a 设置页迁移的落地建议
+
+1. 只加一个依赖：`me.zhanghai.compose.preference:preference`。
+2. 先给 `Settings` 补 `valueFlow()` / `changesFlow()`（基于已有的 DataStore，直接
+   `store.data.map`），**77 个 getter 的同步签名保持不变**——老 XML 页面还在用。
+3. 按 1:1 映射逐页迁：先 `SettingsScreen`（首页，纯分发）与 `AboutScreen`（纯展示，最安全），
+   再 `Eh` / `Download` / `Advanced` / `Privacy` / `Read` 分类页，最后 `Filter` / `MyTags` / `UConfig`。
+   每迁完一页就删掉对应的 `*_settings.xml` 与 Fragment。
+4. `SettingsPreferenceDataStore`（§10.12）只是迁移期的桥，最后一个 XML 页删掉时一起删。
+5. 迁到一半时两套并存没问题：它们共用同一份 DataStore 数据，`valueFlow()` 会让 Compose 侧
+   自动跟上。
+
+### 11.4 落地记录：首页 + 关于页（2026-11-02）
+
+§11.3 的第 1、2 步和第 3 步的前两页（`SettingsScreen` / `AboutScreen`）已经落地。
+
+| 位置 | 改动 |
+| --- | --- |
+| `gradle/libs.versions.toml` / `app/build.gradle.kts` | 无新增依赖（曾试装 `me.zhanghai.compose.preference`，理由见 §11.5 第 1 条，已撤） |
+| `Settings.kt` | 新增 `changesFlow` / `valueFlow` / `valueFlowIntFromStr`；`persistAll` 改成「先算这次真变了哪些 key，更新快照后再发事件」。77 个 getter 的同步签名一个没动 |
+| `ui/compose/screen/settings/SettingsScreen.kt` | 设置首页：6 个分类入口，只做罗列与分发 |
+| `ui/compose/screen/settings/AboutScreen.kt` | 关于页：声明 / 作者 / FAQ / 最新版 / 源码 / 版本号 |
+| `ui/page/settings/SettingsScene.kt`、`AboutScene.kt` | 首页把 `About` 压进返回栈；关于页的链接外跳浏览器 |
+| `EhNavHostActivity` | `entry<EhRoute.Settings>` / `entry<EhRoute.About>`，此前这两个 route 只有声明没有 entry |
+| `MainActivity` | 抽屉的 `nav_settings` 从「起 `SettingsActivity`」改成 `pushRoute(EhRoute.Settings)`，删掉 `settingsLauncher` |
+| `SettingsActivity` | 现在只服务还没迁的子页：用 `newIntent(context, page)` 传 `SettingsPage` 的**枚举名**，没带参数或该页已迁到 Compose 时直接 `finish()` |
+| 删除 | `SettingsFragment` / `AboutFragment` / `VersionPreference` / `settings_headers.xml` / `about_settings.xml` |
+
+几个决定，按「以后会不会踩」排序：
+
+1. **`changesFlow` 发的是 key 集合，不是 §11.1 里的 `Unit`**。`valueFlow` 直接建在它上面；
+   应用级副作用（`SettingsCollector`）也能按 key 过滤，比「只知道变了」多一层信息且不额外花钱。
+2. **`valueFlow` 用 `onStart` 先发一次快照值**，配合 `collectAsState(initial = ...)` 首帧就有值，
+   不会闪默认值；别的 key 变了也会重读一次快照（O(1)），值没变由 `distinctUntilChanged` 挡掉。
+3. **XML 那批「落盘是 String、代码读 Int」的 key**（`theme` / `list_mode` / `screen_rotation` …）
+   单独给了 `valueFlowIntFromStr`：直接用 `valueFlow<Int>` 会永远拿不到值，因为快照里是 String。
+4. **事件在快照更新之后、落盘之前同步发出**：订阅者收到通知时 `getXxx()` 一定已是新值，
+   磁盘写入仍在后台线程，与原来的 `apply()` 同一档保证。
+5. **`settingsLauncher` 那套 `RESULT_OK` 其实是死代码**（全仓没有一处 `setResult`），
+   借这次换成 route 一并删掉；设置页不再需要「回来后刷新栈顶」。
+
+已知取舍：关于页的作者行仍是 HTML 字符串，现在交给 `AnnotatedString.fromHtml` 而不是 Android 的
+`Html.fromHtml`，样式映射由 Compose 决定（`<del>` 这类标签按 Compose 支持的样式渲染）；
+版本号那一行从 `VersionPreference` 搬进 `AboutScreen`，`BUILD_TIME` 在 debug 下本来就是空串，
+显示与原来一致。
+
+**验证**：`:app:spotlessCheck`、`:app:compileDebugKotlin` 通过。真机待跑：抽屉 → 设置 → 6 项各自
+进出与返回键、`About` 的三个外链、分类页标题（`BasePreferenceFragment.onStart` 里的 `setTitle`）。
+
+**下一步**：见 §11.5——Eh / Read / Privacy 三片已经落地，接着是 Download 与 Advanced。
+
+### 11.5 落地记录：Eh / Read / Privacy 三页（2026-11-02）
+
+§11.3 第 3、4 步的主体：三个「全是配置项」的分类页迁完，各自的 XML、Fragment 与只属于
+它们的 `Preference` 子类一起删掉。
+
+| 位置 | 改动 |
+| --- | --- |
+| `ui/compose/screen/settings/PreferenceWidgets.kt` | 新增横向复用点：`SettingsScaffold`（顶栏 + 滚动列）、`PreferenceRow`、`SwitchPreferenceRow`、`ListPreferenceRow`、`StringListPreferenceRow`、`SliderPreferenceRow`、`PreferenceListDialog` |
+| `ui/compose/screen/settings/EhSettingsScreen.kt` | Eh 页 25 项，含三条条件隐藏规则 |
+| `ui/compose/screen/settings/EhSettingsDialogs.kt` | 账号对话框、图片限额对话框（原 `AccountPreference` / `ImageLimitsPreference`） |
+| `ui/compose/screen/settings/ReadSettingsScreen.kt` | 阅读页 14 项 |
+| `ui/compose/screen/settings/PrivacySettingsScreen.kt` | 隐私页 3 项 |
+| `ui/page/settings/EhSettingsViewModel.kt` | 账号身份 Cookie / 图片限额的网络与状态（含退出登录、刷新 igneous、重置限额） |
+| `ui/page/settings/SettingsCategoryScene.kt` | 分类页分流：已迁的就地渲染，未迁的起 `SettingsActivity` 后立刻弹栈 |
+| `ui/compose/nav/EhRoute.kt` | 新增 `data class SettingsCategory(val page: SettingsPage)`；`SettingsPage` 扩成「全部子页」并加 `@Serializable` |
+| `Settings.kt` | 设置页需要的 29 个 `KEY_*` 从 `private` 放开（其余一个字节没动） |
+| 删除 | `eh_settings.xml` / `read_settings.xml` / `privacy_settings.xml`、`EhFragment` / `ReadFragment` / `PrivacyFragment`、`AccountPreference` / `ImageLimitsPreference` / `ClearSearchHistoryPreference` |
+
+几个决定：
+
+1. **没有引第三方设置组件库**。`:app:dependencies` 里试装了
+   `me.zhanghai.compose.preference:preference` 2.2.0（能解析、能编过），最后撤掉：它自带
+   `PreferenceStore` 抽象（按 key 提供 `getStateFlow`/`put`），而我们的存储已经是「类型化
+   getter + 每 key 一条 Flow」，桥接层等于把同一件事写两遍；而我们真正要的只有开关、单选、
+   滑杆三种。于是这三个行直接写在 `PreferenceWidgets.kt` 里，每个约 40 行，全部走
+   `Settings` / `Settings.valueFlow`——「DataStore + M3」这条要求不靠第三方也成立。
+2. **行级绑定，而不是「页面持有全部状态」**。`SwitchPreferenceRow(key, default, titleRes)`
+   自己订阅 `valueFlow`，所以 Eh 页 25 项基本是一行一个；改完之后列表页、阅读器里同一 key
+   的消费者立刻看到新值，不需要「退出设置重进」。
+3. **滑杆拖动期间不落盘**：拖动只改本地状态，`onValueChangeFinished` 才写。
+   DataStore 的每次写入都是一个事务，逐格写会把写入队列排满。
+4. **默认值取 `Settings.DEFAULT_*` 的口径，不照抄 XML**。例如 `gallery_site` 老 XML 写
+   `defaultValue=1`，而 `Settings.DEFAULT_GALLERY_SITE` 是 `0`（E-Hentai）——老页面在没设过
+   这个值时显示的摘要和实际行为本来就是不一致的，新页显示「实际行为」。
+5. **`android:dependency` 改成 `enabled` 变灰**（音量键翻页间隔、自定义亮度）：老写法是
+   整行消失，用户看不出「要先打开开关」。
+6. **三条条件隐藏规则原样保留**：未登录隐藏 `SIGN_IN_REQUIRED` 的 7 项；没有标签翻译包时
+   隐藏翻译开关与下载源；`list_mode` 决定显示「详情尺寸 + 列表缩略图宽度」还是
+   「缩略图尺寸 + 是否显示标题」。
+7. **两个对话框从 `DialogPreference` 搬成 Compose**：状态在 `EhSettingsViewModel` 里
+   （网络失败只更新对话框文案，与原来一致），账号对话框的三个动作（复制 / 刷新 igneous /
+   退出登录）并排在 `AlertDialog` 的 confirm 槽里——`AlertDialog` 只有两个按钮槽，硬塞
+   neutral/negative/positive 反而更乱。
+8. **过渡桥换了形状**：`SettingsPage` 现在既是路由载荷也是分流表；`SettingsActivity` 只认
+   还没迁的子页，已迁的返回 `null` 并 `finish()`。`LegacySettingsPage` 起完 Activity 立刻
+   `pop()`，否则返回键会先回到一个空白 route。
+9. **顺手修了一个一直存在的资源 bug**：`dark_theme` / `dark_theme_follow_system` /
+   `dark_theme_off` / `dark_theme_on` 四个字符串从来没定义过（`arrays.xml` 一直在引用），
+   也就是说老页面的主题项标题和三个选项文字其实是空的。这次补进了默认值与四个翻译。
+
+已知取舍：
+
+- 账号对话框原来加 `FLAG_SECURE`（身份 Cookie 不能截屏），Compose 的 `AlertDialog` 没暴露
+  这个开关，暂时没有等价物。
+- 主题切换仍是「改完 `recreate()` 整棵树」，与老实现同一档；改成不重建需要把所有主题
+  读取点改成 `valueFlow`，不属这一片。
+- 设置页不再 `setResult`（本来就没人接，见 §11.4 第 5 条）。
+
+**验证**：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:lintDebug`（50 warning / 0 error，
+与 §10.16 基线一致）、`:app:testDebugUnitTest` 全通过。真机待跑：三页逐项进出、主题与纯黑主题
+切换、账号对话框四个动作、图片限额重置、未登录/无翻译包时的隐藏项、四个编辑器（过滤器 /
+我的标签 / UConfig / 手势锁）的过渡跳转与返回。
+
+**下一步**：见 §11.6——Download 与 Advanced 也已落地，老的 Preference 链路已经整条拆掉。
+
+### 11.6 落地记录：Download / Advanced，以及老链路的拆除（2026-11-02）
+
+§11.3 剩下两页迁完，顺带把「XML + PreferenceFragmentCompat」这条链整条删掉——全仓已经没有
+任何 `res/xml/*_settings.xml`。
+
+| 位置 | 改动 |
+| --- | --- |
+| `ui/compose/screen/settings/DownloadSettingsScreen.kt` | 下载页 9 项 + 目录确认对话框（原 `DownloadFragment.onPreferenceClick` 里的 AlertDialog） |
+| `ui/compose/screen/settings/AdvancedSettingsScreen.kt` | 高级页 12 项 |
+| `ui/compose/screen/settings/AdvancedSettingsDialogs.kt` | 代理对话框、UA 对话框（原 `ProxyPreference` / `UserAgentPreference`） |
+| `ui/page/settings/DownloadSettingsViewModel.kt` | 下载目录持久化、恢复下载（`getRestoreItem` + `fillGalleryListByApi` 那一套）、清理冗余 |
+| `ui/page/settings/AdvancedSettingsViewModel.kt` | 代理/UA 状态、备份收藏（分页 + `downloadDelay`）、导出/导入数据库、打包 logcat |
+| `ui/page/settings/SettingsCategoryScene.kt` | 两个新场景：SAF 选择器、导出/导入/打包日志的 mime 与建议文件名、语言切换、默认打开设置 |
+| `PreferenceWidgets.kt` | `SwitchPreferenceRow` 支持 `summaryOn/summaryOff`；两个 List 行支持 `summaryFormat`（老的 `setSummaryProvider`） |
+| `Settings.kt` | 再放开 5 个 `KEY_*`（`download_timeout`、`save_parse_error_body`、`save_crash_log`、`read_cache_size`、`dns_over_https`） |
+| 删除 | `download_settings.xml`、`advanced_settings.xml`、`DownloadFragment`、`AdvancedFragment`、`BasePreferenceFragment`、`SettingsPreferenceDataStore`、`ehviewer/preference/`（5 个）、`com/hippo/preference/`（`DialogPreference`、`UrlPreference`）、`preference_dialog_proxy.xml`、`preference_dialog_task.xml`、`attrs.xml` 里两个 styleable、`settings_download_task_confirm` 字符串 |
+
+几个决定：
+
+1. **`TaskPreference` 那套「转圈对话框」换成 `busy` 状态**：恢复/整理/备份/导出/导入期间把
+   相关行置灰，提示仍走宿主的 `showTip`。省的是一套自定义对话框，不是功能。
+2. **文件扫描下沉到 `Dispatchers.IO`**。老代码在 `lifecycleScope.launch`（主线程）里直接
+   `listFiles()`、`delete()`；目录里画廊一多就卡 UI。恢复下载的写入仍在同一协程里顺序执行，
+   没有并发写库的问题。
+3. **恢复下载的判定原样保留**：`.ehviewer` / `ComicInfo.xml` 二选一认 gid；数据库里已有该
+   gid 时只对齐目录名（`putDownloadDirname`），不重复入库；靠 `ComicInfo.xml` 认出来的还要
+   补一份 `SpiderInfo`。
+4. **代理摘要的降级规则照抄**：类型是 HTTP/SOCKS 但 ip 为空或端口非法时，摘要显示「跟随系统」，
+   这正是 `EhProxySelector` 实际会做的事。
+5. **UA 留空回落 `CHROME_USER_AGENT`**，与老对话框一致；对话框本身改成多行输入。
+6. **`app_language` 仍走 `AppCompatDelegate.setApplicationLocales`**，与老实现同一套系统级
+   per-app language。
+
+已知取舍：
+
+- 老实现里 `dump_logcat` / `export_data` 的失败提示依赖 `AlertDialog` 上的一句 tip，现在统一成
+  宿主的 snackbar；导出/导入期间没有模态遮罩，只把入口置灰。
+- `themes_override.xml` 里给 AndroidX Preference 准备的 `PreferenceSummaryTextStyle` 现在没有
+  消费者了，但它是对库样式的 `tools:override`，删掉要一并确认主题继承链，留着不影响 lint 基线。
+- 四个编辑器仍是 Activity + Fragment：它们不是「配置项」，而是独立的编辑界面（WebView、
+  拖拽排序列表、手势锁），迁它们属于另一件事。
+
+**验证**：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:lintDebug`（50 warning / 0 error，
+仍是 §10.16 的基线；期间新增的 `settings_download_task_confirm` 死字符串已删）、
+`:app:testDebugUnitTest` 全通过。真机待跑：下载页换目录/恢复默认/恢复下载/清理冗余、高级页
+代理三态与端口校验、UA 留空回落、备份收藏分页提示、导出导入、打包 logcat、默认打开设置、
+应用语言切换，以及四个编辑器的过渡跳转。
+
+**下一步**：四个编辑器（UConfig / 我的标签是 WebView，过滤器是拖拽列表，手势锁是图案编辑），
+迁完就能删 `SettingsActivity`、`SettingsPage`、`activity_preference.xml` 与
+`themes_override.xml` 里那几条 Preference 样式。
+

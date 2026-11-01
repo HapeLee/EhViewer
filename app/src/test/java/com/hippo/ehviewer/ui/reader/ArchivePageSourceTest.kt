@@ -67,4 +67,36 @@ class ArchivePageSourceTest {
             assertEquals(page.size + 1, second.readBytes().size)
         }
     }
+
+    /** 压缩包给的是「页 → 条目下标」映射（只收图片 + 自然序），页源必须照映射取 */
+    @Test
+    fun honoursThePageToEntryMapping() = runBlocking {
+        val archive = temp.newFile("gallery2.cbz")
+        ZipOutputStream(archive.outputStream()).use { zip ->
+            listOf("cover.txt", "2.jpg", "10.jpg").forEach { name ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(name.toByteArray())
+                zip.closeEntry()
+            }
+        }
+
+        val channel = FileArchiveChannel(archive)
+        val zip = ZipFile.builder().setSeekableByteChannel(channel.channel).get()
+        val cacheDir = temp.newFolder("cache2")
+        ArchivePageSource(PlainZipSession(zip, channel), cacheDir).use { source ->
+            // 不传映射：全部非目录条目，按包内原顺序
+            assertEquals(3, source.count)
+            assertEquals("cover.txt", source.name(0))
+        }
+
+        // session 关了就得重开，不能复用同一个 ZipFile
+        val channel2 = FileArchiveChannel(archive)
+        val zip2 = ZipFile.builder().setSeekableByteChannel(channel2.channel).get()
+        ArchivePageSource(PlainZipSession(zip2, channel2), cacheDir, listOf(2, 1)).use { source ->
+            assertEquals(2, source.count)
+            assertEquals("10.jpg", source.name(0))
+            assertEquals("2.jpg", source.name(1))
+            assertEquals("2.jpg", source.page(1).readBytes().decodeToString())
+        }
+    }
 }

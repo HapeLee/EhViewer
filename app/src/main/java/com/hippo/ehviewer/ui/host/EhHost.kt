@@ -18,7 +18,15 @@ package com.hippo.ehviewer.ui.host
 import android.view.View
 import androidx.annotation.IdRes
 import androidx.annotation.StringRes
-import com.hippo.ehviewer.ui.scene.BaseScene
+
+/**
+ * 提示时长标记，沿用 `BaseScene` 时代的取值（`0` 短 / `1` 长）。
+ *
+ * 宿主据此在 Snackbar 与 Toast 的长短之间二选一；`SceneFragment` 已经删掉，
+ * 这两个常量搬到这里，避免调用方再去碰旧场景层。
+ */
+const val TIP_LENGTH_SHORT = 0
+const val TIP_LENGTH_LONG = 1
 
 /**
  * 宿主壳（应用级 UI）能力。
@@ -50,7 +58,4 @@ interface EhHost {
     fun addAboveSnackView(view: View)
 
     fun removeAboveSnackView(view: View)
-
-    /** 页面自绘的右侧抽屉（快速搜索 / 下载标签 / 收藏分类）随页面切换重建 */
-    fun recreateDrawerView(scene: BaseScene)
 }

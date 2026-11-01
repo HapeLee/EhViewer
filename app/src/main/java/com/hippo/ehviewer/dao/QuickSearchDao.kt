@@ -21,6 +21,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 
 @Dao
@@ -42,4 +43,30 @@ interface QuickSearchDao : BasicDao<QuickSearch> {
 
     @Delete
     fun delete(quickSearch: QuickSearch)
+
+    /**
+     * 把 [fromPosition] 上的快速搜索挪到 [toPosition]：重排区间内所有行的 TIME。
+     * 「读一批 → 改 → 写回」必须在一个事务里，否则并发拖动会写出互相覆盖的时间。
+     */
+    @Transaction
+    fun move(fromPosition: Int, toPosition: Int) {
+        if (fromPosition == toPosition) return
+        val reverse = fromPosition > toPosition
+        val offset = if (reverse) toPosition else fromPosition
+        val limit = if (reverse) fromPosition - toPosition + 1 else toPosition - fromPosition + 1
+        val list = list(offset, limit)
+        val step = if (reverse) 1 else -1
+        val start = if (reverse) limit - 1 else 0
+        val end = if (reverse) 0 else limit - 1
+        val toTime = list[end].time
+        var i = end
+        while (if (reverse) i < start else i > 0) {
+            val aTime = list[i].time
+            val bTime = list[i + step].time
+            list[i].time = if (aTime == bTime) bTime + step else bTime
+            i += step
+        }
+        list[start].time = toTime
+        update(list)
+    }
 }

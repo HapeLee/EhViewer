@@ -17,48 +17,28 @@
 <resources>
 
     <dimen name="keyline_margin">16dp</dimen>
-    <dimen name="single_max_width">260dp</dimen>
-    <dimen name="drawer_max_width">280dp</dimen>
 
     <!-- Text size -->
-    <dimen name="text_super_large">24sp</dimen>
-    <dimen name="text_little_large">20sp</dimen>
     <dimen name="text_little_small">16sp</dimen>
     <dimen name="text_small">14sp</dimen>
-    <dimen name="text_super_small">12sp</dimen>
 
     <!-- RatingView -->
-    <dimen name="rating_size">16dp</dimen>
-    <dimen name="rating_interval">1dp</dimen>
 
     <!-- 4dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_list_interval">0dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_list_margin_h">4dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_list_margin_v">4dp</dimen>
 
     <!-- 4dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_grid_interval">0dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_grid_margin_h">4dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_grid_margin_v">4dp</dimen>
 
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_search_bar_margin_h">6dp</dimen>
     <!-- 12dp - 4dp, 4dp for card padding -->
-    <dimen name="gallery_search_bar_margin_v">8dp</dimen>
 
-    <dimen name="gallery_padding_top_search_bar">64dp</dimen>
-    <dimen name="gallery_padding_bottom_fab">80dp</dimen>
 
     <!-- 4dp - 4dp, 4dp for card padding -->
-    <dimen name="search_layout_interval">0dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="search_layout_margin_h">4dp</dimen>
     <!-- 8dp - 4dp, 4dp for card padding -->
-    <dimen name="search_layout_margin_v">4dp</dimen>
 
     <!-- DrawerArrowDrawable -->
     <dimen name="dad_drawable_size">24dp</dimen>
@@ -72,29 +52,15 @@
     <dimen name="add_size">20dp</dimen>
     <dimen name="add_thickness">2dp</dimen>
 
-    <!-- CategoryTable -->
-    <dimen name="category_table_item_height">40dp</dimen>
-    <dimen name="category_table_item_margin">4dp</dimen>
-
     <!-- AdvanceSearchTable -->
     <dimen name="advance_search_table_item_margin">4dp</dimen>
 
     <!-- Search item -->
-    <dimen name="search_item_interval">8dp</dimen>
-    <dimen name="search_category_padding_h">@dimen/keyline_margin</dimen>
-    <dimen name="search_category_padding_v">@dimen/keyline_margin</dimen>
-    <dimen name="search_category_title_height">48dp</dimen>
 
-    <dimen name="image_search_max_size">240dp</dimen>
 
     <!-- Switch padding -->
-    <dimen name="switch_padding">8dp</dimen>
 
     <!-- FabLayout -->
-    <dimen name="fab_layout_primary_margin">24dp</dimen>
-    <dimen name="fab_layout_secondary_margin">16dp</dimen>
-    <dimen name="fab_size">56dp</dimen>
-    <dimen name="fab_min_size">40dp</dimen>
     <dimen name="fab_rv_padding_size">80dp</dimen>
 
     <!-- Slider -->
@@ -103,13 +69,8 @@
 
     <dimen name="corner_fab_margin">16dp</dimen>
 
-    <dimen name="gallery_detail_thumb_width">128dp</dimen>
-    <dimen name="gallery_detail_thumb_height">192dp</dimen>
 
-    <dimen name="gallery_widget_margin_h">12dp</dimen>
-    <dimen name="gallery_widget_margin_v">12dp</dimen>
 
-    <dimen name="gallery_guide_divider_width">3dp</dimen>
 
     <!-- Lock pattern view -->
     <dimen name="lock_pattern_dot_line_width">3dp</dimen>
@@ -118,15 +79,8 @@
 
     <!-- Custom preference -->
 
-    <!-- Gallery -->
+    <!-- Gallery：只剩 widget_content_layout.xml 还在用，阅读器那套尺寸已搬到 Compose -->
     <dimen name="gallery_content_margin_h">4dp</dimen>
     <dimen name="gallery_content_margin_v">4dp</dimen>
-    <dimen name="gallery_pager_interval">48dp</dimen>
-    <dimen name="gallery_scroll_interval">28dp</dimen>
-    <dimen name="gallery_page_min_height">365dp</dimen>
-    <dimen name="gallery_page_info_interval">24dp</dimen>
-    <dimen name="gallery_progress_size">56dp</dimen>
-    <dimen name="gallery_page_text_size">56sp</dimen>
-    <dimen name="gallery_error_text_size">24sp</dimen>
 
 </resources>

@@ -116,6 +116,9 @@ dependencies {
 
     implementation(libs.androidx.core)
 
+    // https://developer.android.com/jetpack/androidx/releases/datastore
+    implementation(libs.androidx.datastore.preferences)
+
     implementation(libs.androidx.coordinatorlayout)
     implementation(libs.androidx.fragment)
     // https://developer.android.com/jetpack/androidx/releases/lifecycle

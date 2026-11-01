@@ -20,6 +20,7 @@ package com.hippo.ehviewer.dao
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
 @Dao
@@ -38,6 +39,13 @@ interface LocalFavoritesDao : BasicDao<LocalFavoriteInfo> {
 
     @Insert
     override fun insert(t: LocalFavoriteInfo): Long
+
+    /** 已经收藏过就什么都不做；冲突判断交给 SQLite，避免「先查再插」的竞态 */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insertOrIgnore(t: LocalFavoriteInfo): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insertOrIgnore(t: List<LocalFavoriteInfo>)
 
     @Delete
     fun delete(localFavoriteInfo: LocalFavoriteInfo)

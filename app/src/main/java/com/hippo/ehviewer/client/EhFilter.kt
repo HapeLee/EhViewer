@@ -21,6 +21,8 @@ import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.Filter
 import java.util.Locale
 import java.util.regex.Pattern
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
 object EhFilter {
     private val mTitleFilterList: MutableList<Filter> = ArrayList()
@@ -38,8 +40,17 @@ object EhFilter {
     private const val MODE_COMMENT = 5
     private val TAG = EhFilter::class.java.simpleName
 
+    /**
+     * 强制类初始化。
+     *
+     * 下面的 `init` 会读库。读库那一步走 `runBlocking(Dispatchers.IO)`，所以不管是谁、
+     * 在哪个线程第一次碰到 `EhFilter` 都不会变成主线程读库；而 `EhApplication` 启动时
+     * 在 `launchIO` 里预热一次，是为了让这次加载**别阻塞主线程**——两者目的不同。
+     */
+    fun warmUp() = Unit
+
     init {
-        val list = EhDB.allFilter
+        val list = runBlocking(Dispatchers.IO) { EhDB.allFilter }
         var i = 0
         val n = list.size
         while (i < n) {

@@ -121,13 +121,96 @@ sealed interface EhRoute : NavKey {
         val page: Int = 0,
     ) : EhRoute
 
-    /** Compose 阅读器（当前承接压缩包画廊） */
+    /**
+     * 阅读器。
+     *
+     * [page] 是 0 基起始页；负数表示「沿用上次读到的位置」，由页源的 `startPage` 决定。
+     * [source] 决定页数据从哪来，见 [ReaderSource]；压缩包走 [uri] 而不是 gid/token。
+     */
     @Serializable
     data class Reader(
         val gid: Long = -1L,
-        val page: Int = 0,
-        val mode: String? = null,
+        val token: String? = null,
+        val page: Int = -1,
+        val source: ReaderSource = ReaderSource.ONLINE,
+        val uri: String? = null,
     ) : EhRoute
+
+    /**
+     * 设置首页。
+     *
+     * 首页与 [About] 已经是纯 Compose；分类页还没迁完，点进去仍由
+     * [SettingsPage] 交给老的 `SettingsActivity`，最后一个分类页迁完时两者一起删。
+     */
+    @Serializable
+    data object Settings : EhRoute
+
+    /**
+     * 设置分类页。
+     *
+     * [page] 决定内容：五个分类页（Eh / Read / Privacy / Download / Advanced）都已经就地
+     * 渲染；只剩 uconfig、mytags、filter、security 四个编辑器还由 `SettingsActivity`
+     * 承载，见 [SettingsPage]。
+     */
+    @Serializable
+    data class SettingsCategory(val page: SettingsPage) : EhRoute
+
+    /** 关于页（版本、声明、源码与反馈链接） */
+    @Serializable
+    data object About : EhRoute
+}
+
+/**
+ * 设置的全部子页。
+ *
+ * 这个枚举同时是 [EhRoute.SettingsCategory] 的载荷与过渡期的分流表：
+ * `SettingsActivity` 只认得还没迁的四个编辑器，分类页一律返回 `null` 并自行结束
+ * （`createFragment` 的 `when` 是穷尽的，加页时会强制这里跟着改）。
+ * 等这四个编辑器也换成 Compose，`SettingsActivity` 与 `SettingsPage` 一起消失。
+ */
+@Serializable
+enum class SettingsPage {
+    /** 已迁：`EhSettingsScreen` */
+    EH,
+
+    /** 已迁：`ReadSettingsScreen` */
+    READ,
+
+    /** 已迁：`PrivacySettingsScreen` */
+    PRIVACY,
+
+    DOWNLOAD,
+    ADVANCED,
+
+    /** UConfig 编辑器 */
+    UCONFIG,
+
+    /** 我的标签 */
+    MY_TAGS,
+
+    /** 屏蔽规则 */
+    FILTER,
+
+    /** 手势锁设置（从 Privacy 页进入） */
+    SECURITY,
+}
+
+/**
+ * 阅读器的页数据来源。
+ *
+ * 压缩包把 `Uri` 存成 [EhRoute.Reader.uri]（`@Serializable` 塞不进 `Uri` 本身），
+ * 所以外部「用 EhViewer 打开压缩包」也能进 NavHost，不再单独起 Activity。
+ */
+@Serializable
+enum class ReaderSource {
+    /** 在线 / 缓存：走 SpiderQueen 读模式，已下载画廊它自己会先读本地 */
+    ONLINE,
+
+    /** 已下载：直接读下载目录，不发任何请求 */
+    DOWNLOAD,
+
+    /** 本地压缩包（zip / rar / 7z…）：按 [EhRoute.Reader.uri] 打开 */
+    ARCHIVE,
 }
 
 /**
@@ -140,9 +223,10 @@ sealed interface EhRoute : NavKey {
 fun isSolidRoute(route: EhRoute?): Boolean = when (route) {
     is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite -> true
     is EhRoute.GalleryList, is EhRoute.GalleryDetail, is EhRoute.GalleryInfo,
-    is EhRoute.GalleryPreviews, is EhRoute.GalleryComments, is EhRoute.Progress, is EhRoute.Reader,
-    is EhRoute.Favorites, is EhRoute.History, is EhRoute.Downloads, EhRoute.CookieSignIn,
-    EhRoute.WebViewSignIn,
+    is EhRoute.GalleryPreviews, is EhRoute.GalleryComments, is EhRoute.Progress,
+    is EhRoute.Favorites, is EhRoute.History, is EhRoute.Downloads, is EhRoute.Reader,
+    EhRoute.CookieSignIn, EhRoute.WebViewSignIn, EhRoute.Settings, EhRoute.About,
+    is EhRoute.SettingsCategory,
     -> false
     null -> true
 }
@@ -151,16 +235,17 @@ fun isSolidRoute(route: EhRoute?): Boolean = when (route) {
  * 该页面是否解锁左侧抽屉（原 `BaseScene.needShowLeftDrawer()`）。
  *
  * 守卫链上的页面和「进度中转页」都不允许拉抽屉：前者是入口闸门，
- * 后者马上会被详情页替换掉。
+ * 后者马上会被详情页替换掉。阅读器同理——翻页手势不能被抽屉抢走。
  */
 val EhRoute.hasLeftDrawer: Boolean
     get() = when (this) {
         is EhRoute.Security, is EhRoute.SignIn, is EhRoute.SelectSite,
         EhRoute.CookieSignIn, EhRoute.WebViewSignIn,
-        is EhRoute.Progress,
+        is EhRoute.Progress, is EhRoute.Reader,
+        EhRoute.Settings, EhRoute.About, is EhRoute.SettingsCategory,
         -> false
         is EhRoute.GalleryList, is EhRoute.GalleryDetail, is EhRoute.GalleryInfo,
-        is EhRoute.GalleryPreviews, is EhRoute.GalleryComments, is EhRoute.Reader,
+        is EhRoute.GalleryPreviews, is EhRoute.GalleryComments,
         is EhRoute.Favorites, is EhRoute.History, is EhRoute.Downloads,
         -> true
     }
@@ -180,14 +265,22 @@ val EhRoute.navSlot: String
 /**
  * 该页面对应的抽屉勾选项（原 `BaseScene.getNavCheckedItem()`）。
  *
- * 画廊列表页是动态的（跟着当前站点 / 模式走），出壳前仍由 `GalleryListScene` 自己设置，
- * 这里先给 0。
+ * 列表页的勾选跟着查询模式走；页面内搜索换模式后 route 不会变（与旧行为一致：
+ * 就地换内容、不换页面），那种情况由列表页自己把新的 resId 推给宿主。
  */
 val EhRoute.navCheckedItem: Int
     @IdRes get() = when (this) {
         EhRoute.Favorites -> R.id.nav_favourite
         EhRoute.History -> R.id.nav_history
         is EhRoute.Downloads -> R.id.nav_downloads
+        is EhRoute.GalleryList -> when (query.mode) {
+            ListUrlBuilder.MODE_NORMAL -> R.id.nav_homepage
+            ListUrlBuilder.MODE_SUBSCRIPTION -> R.id.nav_subscription
+            ListUrlBuilder.MODE_WHATS_HOT -> R.id.nav_whats_hot
+            ListUrlBuilder.MODE_TOPLIST -> R.id.nav_toplist
+            else -> 0
+        }
+        EhRoute.Settings, is EhRoute.SettingsCategory -> R.id.nav_settings
         else -> 0
     }
 

@@ -69,17 +69,13 @@
     <!-- Gallery Activity -->
     <string name="archive_need_passwd">Archive need password</string>
     <string name="archive_passwd">Password</string>
-    <string name="passwd_cannot_be_empty">Password can\'t be empty</string>
-    <string name="passwd_wrong">Password Wrong</string>
     <string name="page_menu_title">Page %d</string>
     <string name="page_menu_refresh">@string/refresh</string>
     <string name="page_menu_share">@string/share</string>
     <string name="page_menu_save">Save</string>
     <string name="page_menu_save_to">Save to…</string>
     <string name="page_menu_download_original">Download original</string>
-    <string name="gallery_menu_title">Menu</string>
     <string name="share_image">Share image</string>
-    <string name="start_download_original">Downloading, please wait…</string>
     <string name="image_saved">Image saved to %s</string>
 
     <!-- Navigation Bar -->
@@ -130,15 +126,10 @@
     <string name="remove_from_favorite_failure">Failed to remove from favorites</string>
     <!-- Gallery List Fab Action -->
     <string name="go_to">Go to</string>
-    <string name="go_to_gid">GID, leave blank for last page</string>
-    <string name="go_to_hint">Page %1$d, total %2$d pages</string>
     <string name="go_to_last_page">Last page</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">Quick search</string>
-    <string name="quick_search_tip">Tap \"+\" to add Quick Search</string>
-    <string name="readme">README</string>
     <string name="add_quick_search_tip">The state of gallery list will be saved as quick search. Perform a search first to save the state of search panel.</string>
-    <string name="add_quick_search_dialog_title">Add Quick Search</string>
     <string name="save_progress">Save reading progress</string>
     <string name="name_is_empty">Name is empty</string>
     <string name="duplicate_name">This name is already in use.</string>
@@ -146,7 +137,6 @@
     <string name="duplicate_quick_search">A duplicate quick search exists. The name is \"%s\".</string>
     <string name="delete">Delete</string>
     <string name="delete_quick_search_title">Delete Quick Search</string>
-    <string name="delete_quick_search_message">Delete \"%s\"?</string>
 
     <!-- Gallery Search -->
     <string name="search_normal">Normal Search</string>
@@ -156,7 +146,6 @@
     <string name="search_specify_tag">Specify tag</string>
     <string name="search_tip">Normal search: Simply search.\n\nSubscription search: Search in subscriptions.\n\nSpecify uploader: Search for galleries uploaded by the specified uploader. All other options will be ignored.\n\nSpecify tag: Search for galleries that contain the specified tag. Only one tag accepted. Other options will be ignored.</string>
     <string name="search_enable_advance">Enable advance options</string>
-    <string name="search_advance">Advanced Options</string>
     <string name="search_sh">Only Show Expunged Galleries</string>
     <string name="search_sto">Only Show Galleries With Torrents</string>
     <string name="search_sr">Minimum Rating:</string>
@@ -206,8 +195,6 @@
 
     <!-- Gallery Detail Scene -->
     <string name="download_upgradeable">Upgradeable</string>
-    <string name="download_upgrade_existed">The gallery already exists, please delete it and try again</string>
-    <string name="download_upgrade_service_failed">Due to system limitations, the download service cannot be started from the background. Please click OK to start.</string>
     <string name="read_from">Read page %d</string>
     <plurals name="page_count">
         <item quantity="one">%d page</item>
@@ -240,7 +227,6 @@
     <string name="open_in_other_app">Open with other app</string>
     <string name="filter_the_uploader">Block the uploader \"%s\"?</string>
     <string name="filter_added">Blocker added</string>
-    <string name="copy_trans">Copy translation</string>
     <string name="show_definition">Show definition</string>
     <string name="filter_the_tag">Block the tag \"%s\"?</string>
     <string name="tag_vote_up">Vote up</string>
@@ -251,8 +237,6 @@
     <string name="vote_failed">Vote failed</string>
     <!-- Gallery Info -->
     <string name="gallery_info">Gallery Info</string>
-    <string name="header_key">Key</string>
-    <string name="header_value">Value</string>
     <string name="key_gid" translatable="false">GID</string>
     <string name="key_token" translatable="false">Token</string>
     <string name="key_url">URL</string>
@@ -276,7 +260,6 @@
     <string name="key_torrent_url">Torrent URL</string>
     <string name="copied_to_clipboard">Copied to clipboard</string>
     <!-- Gallery Torrents -->
-    <string name="torrents">Torrents</string>
     <string name="no_torrents">No torrents</string>
     <string name="download_torrent_started">Torrent download started</string>
     <string name="download_torrent_failure">Failed to download torrent</string>
@@ -304,7 +287,6 @@
     <string name="rating3">AWFUL</string>
     <string name="rating2">PAINFUL</string>
     <string name="rating1">UNBEARABLE</string>
-    <string name="rating0">DISASTER</string>
     <string name="rating_none" translatable="false">(´_ゝ`)</string>
     <!-- Gallery Comments -->
     <string name="gallery_comments">Gallery Comments</string>
@@ -329,12 +311,7 @@
     <string name="vote_down_successfully">Voted down successfully</string>
     <string name="cancel_vote_down_successfully">Down-vote cancelled successfully</string>
     <string name="check_vote_status">View vote details</string>
-    <string name="format_bold"><b>Bold</b></string>
-    <string name="format_italic"><i>Italic</i></string>
-    <string name="format_strikethrough"><strike>Strikethrough</strike></string>
-    <string name="format_underline"><u>Underline</u></string>
     <string name="format_url">URL</string>
-    <string name="format_plain">Plain text</string>
     <!-- Gallery Previews -->
     <string name="gallery_previews">Gallery Previews</string>
 
@@ -354,7 +331,6 @@
     <string name="move_favorites_dialog_title">Move favorites</string>
 
     <!-- History Scene -->
-    <string name="no_history">Viewed galleries will be shown here</string>
     <string name="clear_all">Clear all</string>
     <string name="clear_all_history">Clear all history?</string>
 
@@ -445,6 +421,10 @@
     <string name="settings_eh_my_tags">My tags</string>
     <string name="settings_eh_my_tags_summary">My tags on E-Hentai website</string>
     <string name="settings_eh_black_dark_theme">Black dark theme</string>
+    <string name="dark_theme">Theme</string>
+    <string name="dark_theme_follow_system">Follow system</string>
+    <string name="dark_theme_off">Off</string>
+    <string name="dark_theme_on">On</string>
     <string name="settings_eh_launch_page">Launch page</string>
     <string name="settings_eh_list_mode">List mode</string>
     <string name="settings_eh_list_mode_detail">Detail</string>
@@ -499,9 +479,6 @@
     <string name="settings_read_theme_dark">Dark</string>
     <string name="settings_read_theme_light">Light</string>
     <string name="settings_read_keep_screen_on">Keep screen on</string>
-    <string name="settings_read_show_clock">Show clock</string>
-    <string name="settings_read_show_progress">Show progress</string>
-    <string name="settings_read_show_battery">Show battery</string>
     <string name="settings_read_show_page_interval">Show page interval</string>
     <string name="settings_read_turn_page_interval">Turn page interval (in seconds)</string>
     <string name="settings_read_volume_page">Use volume key to turn pages</string>
@@ -531,7 +508,6 @@
     <string name="settings_download_download_origin_image_never">Never</string>
     <string name="settings_download_download_origin_image_force">Always</string>
     <string name="settings_download_download_origin_image_only">Download only</string>
-    <string name="settings_download_task_confirm">Are you sure you want to perform this action?</string>
     <string name="settings_download_restore_download_items">Restore download items</string>
     <string name="settings_download_restore_download_items_summary">Restore all download items in download location</string>
     <string name="settings_download_restore_not_found">Not found download items to restore</string>
@@ -604,6 +580,7 @@
     <string name="filter_tip">This blocking system filters the result of EHentai website blocking system.\n\nTitle Blocker: exclude the gallery whose title contains the word.\n\nUploader Blocker: exclude the gallery which was uploaded by the uploader.\n\nTag Blocker: exclude the gallery which contain the tag, it takes more time to get gallery list.\n\nTag Namespace Blocker: exclude the gallery which contain the tag namespace, it takes more time to get gallery list.\n\nCommenter Blocker: exclude the comments posted by the commenter.\n\nComment Blocker: exclude the comments matching the regex.</string>
     <string name="no_filter">Blockers will be shown here</string>
     <string name="add_filter">Add blocker</string>
+    <string name="night_mode">Night mode</string>
     <string name="filter_title">Title</string>
     <string name="filter_uploader">Uploader</string>
     <string name="filter_tag">Tag</string>
@@ -665,25 +642,20 @@
     <string name="error_cant_find_activity">Can\'t find the application</string>
     <string name="error_cannot_parse_the_url">Can\'t parse the URL</string>
     <string name="error_decoding_failed">Decoding failed</string>
-    <string name="error_empty">Empty</string>
     <string name="error_reading_failed">Reading Failed</string>
     <string name="error_out_of_range">Out of range</string>
-    <string name="error_write_failed">Write failed</string>
     <string name="error_parse_error">Parse error</string>
     <string name="error_509" translatable="false">509</string>
     <string name="error_invalid_url">Invalid URL</string>
     <string name="error_get_ptoken_error">Get pToken error</string>
     <string name="error_cant_create_temp_file">Couldn\'t create temp file</string>
     <string name="error_cant_save_image">Can\'t save image</string>
-    <string name="error_invalid_number">Invalid number</string>
     <string name="error_please_login_first">Please log in first</string>
     <string name="error_cannot_find_gallery">Couldn\'t find the gallery</string>
     <string name="error_something_wrong_happened">Something wrong happened</string>
-    <string name="kokomade_tip">Settings-&gt;Eh-&gt;Gallery Site-&gt;E-Hentai</string>
     <string name="no_browser_installed">Just install a browser please.</string>
     <string name="cloudflare_bypass_failed">Failed to bypass Cloudflare challenge</string>
     <string name="open_in_webview">Open URL in WebView to finish the challenge?</string>
-    <string name="information_webview_outdated">Please update the WebView app for better compatibility</string>
 
     <!-- Readable Time -->
     <string name="from_the_future">From the future</string>

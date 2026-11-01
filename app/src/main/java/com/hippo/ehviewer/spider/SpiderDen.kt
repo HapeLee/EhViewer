@@ -26,7 +26,6 @@ import com.hippo.ehviewer.client.getImageKey
 import com.hippo.ehviewer.coil.edit
 import com.hippo.ehviewer.coil.read
 import com.hippo.ehviewer.download.DownloadManager
-import com.hippo.ehviewer.gallery.GalleryProvider2.Companion.SUPPORT_IMAGE_EXTENSIONS
 import com.hippo.image.UniFileSource
 import com.hippo.unifile.UniFile
 import com.hippo.unifile.openOutputStream
@@ -38,6 +37,7 @@ import com.hippo.yorozuya.FileUtils
 import com.hippo.yorozuya.cleanAsDirname
 import java.io.IOException
 import java.util.Locale
+import kotlinx.coroutines.runBlocking
 import okhttp3.Response
 import okhttp3.coroutines.executeAsync
 import okio.buffer
@@ -287,6 +287,19 @@ class SpiderDen(private val mGalleryInfo: GalleryInfo) {
 
     companion object {
         private val TAG = SpiderDen::class.java.simpleName
+
+        /**
+         * 支持的图片扩展名（带点）。
+         *
+         * 原来挂在 `GalleryProvider2` 上，旧 GL 栈删掉之后搬到这里——压缩包页源也要用。
+         */
+        val SUPPORT_IMAGE_EXTENSIONS = arrayOf(
+            ".jpg",
+            ".png",
+            ".gif",
+            ".webp",
+        )
+
         private val COMPAT_IMAGE_EXTENSIONS = SUPPORT_IMAGE_EXTENSIONS + ".jpeg"
         private val GIF_IMAGE_EXTENSION = SUPPORT_IMAGE_EXTENSIONS[2]
 
@@ -310,7 +323,10 @@ class SpiderDen(private val mGalleryInfo: GalleryInfo) {
         }
 
         private fun perDownloadDir(gid: Long, dirname: String): UniFile? {
-            DownloadManager.putDownloadDirname(gid, dirname)
+            // 内存态必须先于建目录生效，所以这里不能火后不管，只能 runBlocking 桥一下。
+            // DB 的写仍在 IO 线程（putDownloadDirname 内部 withIOContext），
+            // 与改造前「直接在本线程写库」的阻塞量级一致。P6-c 会把整条链换成协程
+            runBlocking { DownloadManager.putDownloadDirname(gid, dirname) }
             return getGalleryDownloadDir(gid)?.takeIf { it.ensureDir() }
         }
 

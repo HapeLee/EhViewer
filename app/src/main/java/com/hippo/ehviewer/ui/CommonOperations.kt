@@ -32,10 +32,13 @@ import com.hippo.ehviewer.client.EhRequest
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.download.DownloadService
-import com.hippo.ehviewer.ui.scene.BaseScene
+import com.hippo.ehviewer.ui.host.TIP_LENGTH_SHORT
 import com.hippo.unifile.UniFile
 import com.hippo.util.isAtLeastT
+import com.hippo.util.launchIO
+import com.hippo.util.withUIContext
 import com.hippo.yorozuya.collect.LongList
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -63,8 +66,12 @@ object CommonOperations {
     ) {
         when (slot) {
             -1 -> {
-                EhDB.putLocalFavorites(galleryInfo)
-                listener.onSuccess(Unit)
+                // Room 不能在 UI 线程跑（P6-a），本地收藏只是落一条库
+                @OptIn(DelicateCoroutinesApi::class)
+                launchIO {
+                    EhDB.putLocalFavorites(galleryInfo)
+                    withUIContext { listener.onSuccess(Unit) }
+                }
             }
             in 0..9 -> {
                 if (!foreEdit && Settings.neverAddFavNotes) {
@@ -81,7 +88,7 @@ object CommonOperations {
                     builder.setPositiveButton(android.R.string.ok, null)
                     val dialog = builder.show()
                     dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-                        val text = builder.text.trim { it <= ' ' }
+                        val text = builder.text.trim()
                         Settings.putNeverAddFavNotes(builder.isChecked)
                         dialog.dismiss()
                         doAddToFavorites(activity, galleryInfo, slot, text, listener)
@@ -148,16 +155,22 @@ object CommonOperations {
         listener: EhClient.Callback<Unit>,
         isLocal: Boolean = false,
     ) {
-        EhDB.removeLocalFavorites(galleryInfo.gid)
-        if (isLocal) {
-            EhDB.updateHistoryFavSlot(galleryInfo.gid, -2)
-            listener.onSuccess(Unit)
-        } else {
-            val request = EhRequest()
-            request.setMethod(EhClient.METHOD_ADD_FAVORITES)
-            request.setArgs(galleryInfo.gid, galleryInfo.token, -1, "")
-            request.setCallback(DelegateFavoriteCallback(listener, galleryInfo, null, -2))
-            request.enqueue(activity!!)
+        @OptIn(DelicateCoroutinesApi::class)
+        launchIO {
+            EhDB.removeLocalFavorites(galleryInfo.gid)
+            if (isLocal) {
+                EhDB.updateHistoryFavSlot(galleryInfo.gid, -2)
+                withUIContext { listener.onSuccess(Unit) }
+            } else {
+                // 网络请求要在主线程发起：EhClient 的回调会直接回调到调用线程
+                withUIContext {
+                    val request = EhRequest()
+                    request.setMethod(EhClient.METHOD_ADD_FAVORITES)
+                    request.setArgs(galleryInfo.gid, galleryInfo.token, -1, "")
+                    request.setCallback(DelegateFavoriteCallback(listener, galleryInfo, null, -2))
+                    request.enqueue(activity!!)
+                }
+            }
         }
     }
 
@@ -197,7 +210,7 @@ object CommonOperations {
             ContextCompat.startForegroundService(activity, intent)
         }
         if (toAdd.isEmpty()) {
-            activity.showTip(R.string.added_to_download_list, BaseScene.LENGTH_SHORT)
+            activity.showTip(R.string.added_to_download_list, TIP_LENGTH_SHORT)
             return
         }
         var justStart = forceDefault
@@ -222,7 +235,7 @@ object CommonOperations {
                 ContextCompat.startForegroundService(activity, intent)
             }
             // Notify
-            activity.showTip(R.string.added_to_download_list, BaseScene.LENGTH_SHORT)
+            activity.showTip(R.string.added_to_download_list, TIP_LENGTH_SHORT)
         } else {
             // Let use chose label
             val list = DownloadManager.labelList
@@ -258,7 +271,7 @@ object CommonOperations {
                         Settings.putHasDefaultDownloadLabel(false)
                     }
                     // Notify
-                    activity.showTip(R.string.added_to_download_list, BaseScene.LENGTH_SHORT)
+                    activity.showTip(R.string.added_to_download_list, TIP_LENGTH_SHORT)
                 },
                 activity.getString(R.string.remember_download_label),
                 false,
@@ -274,12 +287,17 @@ object CommonOperations {
         private val newFavoriteName: String?,
         private val slot: Int,
     ) : EhClient.Callback<Unit> {
+        @OptIn(DelicateCoroutinesApi::class)
         override fun onSuccess(result: Unit) {
-            EhDB.updateHistoryFavSlot(info.gid, slot)
-            info.favoriteName = newFavoriteName
-            info.favoriteSlot = slot
-            delegate.onSuccess(result)
-            favouriteStatusRouter.modifyFavourites(info.gid, slot)
+            launchIO {
+                EhDB.updateHistoryFavSlot(info.gid, slot)
+                withUIContext {
+                    info.favoriteName = newFavoriteName
+                    info.favoriteSlot = slot
+                    delegate.onSuccess(result)
+                    favouriteStatusRouter.modifyFavourites(info.gid, slot)
+                }
+            }
         }
 
         override fun onFailure(e: Exception) {

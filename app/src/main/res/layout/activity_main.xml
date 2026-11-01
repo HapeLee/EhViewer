@@ -61,13 +61,5 @@
             app:itemShapeInsetTop="0dp"
             app:menu="@menu/nav_drawer_main" />
 
-        <com.hippo.widget.DrawerView
-            android:id="@+id/right_drawer"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:layout_gravity="end"
-            android:fitsSystemWindows="false"
-            android:maxWidth="@dimen/drawer_max_width" />
-
     </androidx.drawerlayout.widget.DrawerLayout>
 </FrameLayout>

@@ -93,16 +93,6 @@ class Image private constructor(
         }
     }
 
-    fun texImage(init: Boolean, offsetX: Int, offsetY: Int, width: Int, height: Int) {
-        val bitmap = if (image is BitmapImage) {
-            image.bitmap
-        } else {
-            updateBitmap()
-            mBitmap!!
-        }
-        uploadTileTexture(bitmap, init, offsetX, offsetY, width, height)
-    }
-
     fun start() {
         if (!started) {
             started = true

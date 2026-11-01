@@ -64,17 +64,13 @@
     <!-- Gallery Activity -->
     <string name="archive_need_passwd">歸檔文件需要密碼</string>
     <string name="archive_passwd">請輸入密碼</string>
-    <string name="passwd_cannot_be_empty">密碼不能為空</string>
-    <string name="passwd_wrong">密碼錯誤</string>
     <string name="page_menu_title">第 %d 頁</string>
     <string name="page_menu_refresh">@string/refresh</string>
     <string name="page_menu_share">@string/share</string>
     <string name="page_menu_save">保存</string>
     <string name="page_menu_save_to">保存到…</string>
     <string name="page_menu_download_original">下載原圖</string>
-    <string name="gallery_menu_title">菜單</string>
     <string name="share_image">分享圖片</string>
-    <string name="start_download_original">開始下載原圖，請稍候…</string>
     <string name="image_saved">圖片已保存至 %s</string>
 
     <!-- Navigation Bar -->
@@ -123,14 +119,9 @@
     <string name="remove_from_favorite_failure">移除收藏失敗</string>
     <!-- Gallery List Fab Action -->
     <string name="go_to">跳頁</string>
-    <string name="go_to_gid">GID，留空跳轉末頁</string>
-    <string name="go_to_hint">第 %1$d 頁，共 %2$d 頁</string>
     <!-- Gallery List Quick Search -->
     <string name="quick_search">快速搜索</string>
-    <string name="quick_search_tip">點擊“+”來添加快速搜索</string>
-    <string name="readme">讀我</string>
     <string name="add_quick_search_tip">畫廊列表的狀態將被保存為快速搜索。如果您希望保存搜索面板的狀態，請先執行搜索。</string>
-    <string name="add_quick_search_dialog_title">添加快速搜索</string>
     <string name="save_progress">同時保存閲讀進度</string>
     <string name="name_is_empty">名稱為空</string>
     <string name="duplicate_name">已存在相同名稱</string>
@@ -138,7 +129,6 @@
     <string name="duplicate_quick_search">已存在相同的快速搜索，名稱為“%s”。</string>
     <string name="delete">刪除</string>
     <string name="delete_quick_search_title">刪除快速搜索</string>
-    <string name="delete_quick_search_message">刪除“%s”？</string>
 
     <!-- Gallery Search -->
     <string name="search_normal">普通搜索</string>
@@ -148,7 +138,6 @@
     <string name="search_specify_tag">指定標籤</string>
     <string name="search_tip">一般搜索：就是搜索。\n\n訂閲搜素：在訂閲中搜索。\n\n指定上傳者：列出該上傳者上傳的畫廊。其他選項會被忽略。\n\n指定標籤：列出含有該標籤的畫廊。其他選項會被忽略。</string>
     <string name="search_enable_advance">啓用高級選項</string>
-    <string name="search_advance">高級選項</string>
     <string name="search_sh">僅顯示被刪除的畫廊</string>
     <string name="search_sto">僅顯示有種子的畫廊</string>
     <string name="search_sr">最低評分：</string>
@@ -174,8 +163,6 @@
 
     <!-- Gallery Detail Scene -->
     <string name="download_upgradeable">可升級</string>
-    <string name="download_upgrade_existed">目標畫廊已存在，請刪除後重試</string>
-    <string name="download_upgrade_service_failed">由於系統限制，無法從後台啓動下載服務，請點擊確定開始下載</string>
     <string name="read_from">從第 %d 頁閲讀</string>
     <plurals name="page_count">
         <item quantity="other">%d 頁</item>
@@ -206,7 +193,6 @@
     <string name="open_in_other_app">在其他應用中打開</string>
     <string name="filter_the_uploader">屏蔽上傳者“%s”？</string>
     <string name="filter_added">已添加屏蔽項</string>
-    <string name="copy_trans">複製翻譯</string>
     <string name="show_definition">查看定義</string>
     <string name="filter_the_tag">屏蔽標籤“%s”？</string>
     <string name="tag_vote_up">是的，這很正確</string>
@@ -217,8 +203,6 @@
     <string name="vote_failed">投票失敗</string>
     <!-- Gallery Info -->
     <string name="gallery_info">畫廊信息</string>
-    <string name="header_key">鍵</string>
-    <string name="header_value">值</string>
     <string name="key_url">鏈接</string>
     <string name="key_title">標題</string>
     <string name="key_title_jpn">日文標題</string>
@@ -240,7 +224,6 @@
     <string name="key_torrent_url">種子</string>
     <string name="copied_to_clipboard">已複製到剪切板</string>
     <!-- Gallery Torrents -->
-    <string name="torrents">種子</string>
     <string name="no_torrents">沒有種子</string>
     <string name="download_torrent_started">開始下載種子</string>
     <string name="download_torrent_failure">無法下載種子</string>
@@ -268,7 +251,6 @@
     <string name="rating3">糟糕</string>
     <string name="rating2">瞎眼</string>
     <string name="rating1">快要窒息了</string>
-    <string name="rating0">…</string>
     <!-- Gallery Comments -->
     <string name="gallery_comments">畫廊評論</string>
     <string name="no_one_comments_gallery">暫時沒有評論</string>
@@ -292,12 +274,7 @@
     <string name="vote_down_successfully">已欽定為垃圾評論</string>
     <string name="cancel_vote_down_successfully">已不再欽定為垃圾評論</string>
     <string name="check_vote_status">查看投票情況</string>
-    <string name="format_bold"><b>加粗</b></string>
-    <string name="format_italic"><i>傾斜</i></string>
-    <string name="format_strikethrough"><strike>刪除線</strike></string>
-    <string name="format_underline"><u>下劃線</u></string>
     <string name="format_url">鏈接</string>
-    <string name="format_plain">純文本</string>
     <!-- Gallery Previews -->
     <string name="gallery_previews">畫廊預覽</string>
 
@@ -317,7 +294,6 @@
     <string name="move_favorites_dialog_title">移動收藏</string>
 
     <!-- History Scene -->
-    <string name="no_history">這裏是閲讀歷史</string>
     <string name="clear_all">全部清除</string>
     <string name="clear_all_history">清除所有閲讀歷史？</string>
 
@@ -407,6 +383,10 @@
     <string name="settings_eh_my_tags">我的標籤</string>
     <string name="settings_eh_my_tags_summary">E-Hentai 網站上的我的標籤</string>
     <string name="settings_eh_black_dark_theme">純黑深色主題</string>
+    <string name="dark_theme">主題</string>
+    <string name="dark_theme_follow_system">跟隨系統</string>
+    <string name="dark_theme_off">關閉</string>
+    <string name="dark_theme_on">開啟</string>
     <string name="settings_eh_launch_page">啓動頁</string>
     <string name="settings_eh_list_mode">列表模式</string>
     <string name="settings_eh_list_mode_detail">詳情</string>
@@ -461,9 +441,6 @@
     <string name="settings_read_theme_dark">暗色</string>
     <string name="settings_read_theme_light">亮色</string>
     <string name="settings_read_keep_screen_on">屏幕常亮</string>
-    <string name="settings_read_show_clock">顯示時鐘</string>
-    <string name="settings_read_show_progress">顯示進度</string>
-    <string name="settings_read_show_battery">顯示電量</string>
     <string name="settings_read_show_page_interval">顯示頁面間隔</string>
     <string name="settings_read_turn_page_interval">自動翻頁間隔（秒）</string>
     <string name="settings_read_volume_page">使用音量鍵翻頁</string>
@@ -493,7 +470,6 @@
     <string name="settings_download_download_origin_image_never">從不啓用</string>
     <string name="settings_download_download_origin_image_force">總是啓用</string>
     <string name="settings_download_download_origin_image_only">僅下載時啓用</string>
-    <string name="settings_download_task_confirm">確定要執行操作？</string>
     <string name="settings_download_restore_download_items">恢復下載項</string>
     <string name="settings_download_restore_download_items_summary">恢復下載目錄裏的所有下載項</string>
     <string name="settings_download_restore_not_found">未找到可恢復下載項</string>
@@ -593,24 +569,19 @@
     <string name="error_cant_find_activity">找不到相應的應用</string>
     <string name="error_cannot_parse_the_url">無法解析鏈接</string>
     <string name="error_decoding_failed">解碼失敗</string>
-    <string name="error_empty">空</string>
     <string name="error_reading_failed">讀取失敗</string>
     <string name="error_out_of_range">越界</string>
-    <string name="error_write_failed">寫入失敗</string>
     <string name="error_parse_error">解析失敗</string>
     <string name="error_invalid_url">無效鏈接</string>
     <string name="error_get_ptoken_error">獲取 pToken 錯誤</string>
     <string name="error_cant_create_temp_file">無法創建臨時文件</string>
     <string name="error_cant_save_image">無法保存圖片</string>
-    <string name="error_invalid_number">非法數字</string>
     <string name="error_please_login_first">請先登錄</string>
     <string name="error_cannot_find_gallery">找不到畫廊</string>
     <string name="error_something_wrong_happened">被玩壞了</string>
-    <string name="kokomade_tip">設置-&gt;Eh-&gt;畫廊站點-&gt;E-Hentai</string>
     <string name="no_browser_installed">請安裝一個瀏覽器。</string>
     <string name="cloudflare_bypass_failed">未能繞過 Cloudflare 驗證</string>
     <string name="open_in_webview">在 WebView 中打開鏈接以通過驗證？</string>
-    <string name="information_webview_outdated">請更新 WebView 以獲得更佳的相容性</string>
 
     <!-- Readable Time -->
     <string name="from_the_future">來自未來</string>
@@ -638,4 +609,5 @@
     <plurals name="year">
         <item quantity="other">年</item>
     </plurals>
+    <string name="night_mode">夜間模式</string>
 </resources>

@@ -82,7 +82,7 @@ import com.hippo.ehviewer.dao.HistoryInfo
 import kotlin.math.roundToInt
 
 /**
- * 历史记录页的长按动作，具体实现留在 [com.hippo.ehviewer.ui.scene.HistoryScene] 里
+ * 历史记录页的长按动作，具体实现留在 [com.hippo.ehviewer.ui.page.history.HistoryScene] 里
  * （下载管理器、收藏接口、数据库都在那边）。
  *
  * [onMoveLabel] 收到的是标签下标，0 表示默认标签（与旧的 `MoveDialogHelper` 一致）。

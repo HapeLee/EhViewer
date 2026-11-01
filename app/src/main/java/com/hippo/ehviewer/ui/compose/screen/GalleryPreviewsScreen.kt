@@ -84,7 +84,7 @@ private const val THUMB_ASPECT = 0.667f
  *
  * 迁移点：
  * - `ContentLayout` + `ContentHelper` 的分页进度不再由 Adapter 驱动，改由外部持有
- *   已加载的页块（[com.hippo.ehviewer.ui.scene.GalleryPreviewsScene]），本屏只负责呈现
+ *   已加载的页块（`GalleryPreviewsViewModel`），本屏只负责呈现
  * - 列宽仍取 `Settings.previewSize`，用 `BoxWithConstraints` 反推列数，替代
  *   `AutoGridLayoutManager` + `STRATEGY_SUITABLE_SIZE`
  * - 「跳转页码」用 `AlertDialog` + `Slider`，替代 `dialog_go_to.xml` + `GoToDialogHelper`

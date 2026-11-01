@@ -94,15 +94,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
-        </activity>
 
-        <activity
-            android:name="com.hippo.ehviewer.ui.GalleryActivity"
-            android:configChanges="screenSize"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:theme="@style/AppTheme.Gallery">
-
+            <!--
+              外部「用 EhViewer 打开压缩包」：原来是单独的 GalleryActivity，
+              旧栈删掉后挂在宿主上，交给 MainActivity.handleIntent 转成阅读器 route。
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 

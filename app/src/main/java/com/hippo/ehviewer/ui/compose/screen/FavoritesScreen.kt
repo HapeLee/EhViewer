@@ -608,5 +608,3 @@ private fun ErrorState(error: String, onRetry: () -> Unit) {
         TextButton(onClick = onRetry) { Text(stringResource(R.string.refresh)) }
     }
 }
-
-private val CARD_THUMB_HEIGHT = 112.dp

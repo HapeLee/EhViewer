@@ -16,7 +16,6 @@
 package com.hippo.ehviewer.ui.host
 
 import android.annotation.SuppressLint
-import android.app.assist.AssistContent
 import android.content.Intent
 import android.os.Bundle
 import androidx.compose.runtime.Composable
@@ -25,18 +24,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.GravityCompat
 import androidx.core.view.SoftwareKeyboardControllerCompat
 import androidx.drawerlayout.widget.DrawerLayout
-import androidx.fragment.app.FragmentActivity
-import androidx.fragment.app.FragmentContainerView
-import androidx.fragment.app.commitNow
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -49,27 +41,30 @@ import com.hippo.ehviewer.ui.compose.nav.EhNavigator
 import com.hippo.ehviewer.ui.compose.nav.EhNavigatorProvider
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.LocalEhNavigator
-import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
-import com.hippo.ehviewer.ui.compose.nav.compatSceneClassNameOf
-import com.hippo.ehviewer.ui.compose.nav.compatSceneClassOf
-import com.hippo.ehviewer.ui.compose.nav.compatSceneKeyOf
+import com.hippo.ehviewer.ui.compose.nav.decodeRoute
 import com.hippo.ehviewer.ui.compose.nav.hasLeftDrawer
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
 import com.hippo.ehviewer.ui.compose.nav.navCheckedItem
-import com.hippo.ehviewer.ui.compose.nav.routeOf
-import com.hippo.ehviewer.ui.compose.nav.toLegacyArgs
+import com.hippo.ehviewer.ui.compose.reader.ReaderRoute
 import com.hippo.ehviewer.ui.compose.theme.EhTheme
-import com.hippo.ehviewer.ui.scene.CookieSignInScene
-import com.hippo.ehviewer.ui.scene.DownloadsScene
-import com.hippo.ehviewer.ui.scene.HistoryScene
-import com.hippo.ehviewer.ui.scene.SecurityScene
-import com.hippo.ehviewer.ui.scene.SelectSiteScene
-import com.hippo.ehviewer.ui.scene.SignInScene
-import com.hippo.ehviewer.ui.scene.WebViewSignInScene
-import com.hippo.scene.Announcer
-import com.hippo.scene.SceneFragment
-import com.hippo.scene.SceneHost
+import com.hippo.ehviewer.ui.page.downloads.DownloadsScene
+import com.hippo.ehviewer.ui.page.favorites.FavoritesScene
+import com.hippo.ehviewer.ui.page.gallery.GalleryCommentsScene
+import com.hippo.ehviewer.ui.page.gallery.GalleryDetailScene
+import com.hippo.ehviewer.ui.page.gallery.GalleryInfoScene
+import com.hippo.ehviewer.ui.page.gallery.GalleryListScene
+import com.hippo.ehviewer.ui.page.gallery.GalleryPreviewsScene
+import com.hippo.ehviewer.ui.page.gallery.ProgressScene
+import com.hippo.ehviewer.ui.page.history.HistoryScene
+import com.hippo.ehviewer.ui.page.security.CookieSignInScene
+import com.hippo.ehviewer.ui.page.security.SecurityScene
+import com.hippo.ehviewer.ui.page.security.SelectSiteScene
+import com.hippo.ehviewer.ui.page.security.SignInScene
+import com.hippo.ehviewer.ui.page.security.WebViewSignInScene
+import com.hippo.ehviewer.ui.page.settings.AboutScene
+import com.hippo.ehviewer.ui.page.settings.SettingsCategoryScene
+import com.hippo.ehviewer.ui.page.settings.SettingsScene
 
 /**
  * 应用级导航宿主：一个 Activity、一棵 Compose 树、一个 [NavDisplay] 返回栈。
@@ -78,9 +73,8 @@ import com.hippo.scene.SceneHost
  * 返回键要在两层之间判断。这里把两层合成一层：
  * 页面就是返回栈里的 entry，[EhNavController] 是唯一状态源。
  */
-abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider {
+abstract class EhNavHostActivity : EhActivity(), EhNavigatorProvider {
     private val navEntries = mutableStateListOf<NavKey>()
-    private val sceneIndex = HashMap<String, SceneFragment>()
 
     /** 唯一的返回栈；弹到栈底还继续弹就是收掉宿主 */
     val navController: EhNavController = EhNavController(
@@ -170,7 +164,13 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
      * @return `true` for start scene
      */
     private fun startSceneFromIntent(intent: Intent): Boolean {
-        // 页面出壳后已经没有类可反射，这里只认名字，映射交给 [onStartSceneFromIntent]
+        // 首选 route 载荷：页面出壳之后，「去哪个页面」就是 route 本身
+        intent.getByteArrayExtra(KEY_SCENE_ROUTE)?.let { bytes ->
+            val route = decodeRoute(bytes) ?: return false
+            pushRoute(route)
+            return true
+        }
+        // 兜底：服务进程给不了 route 对象，只能给「名字 + 几个标量」（目前只有下载页）
         val sceneName = intent.getStringExtra(KEY_SCENE_NAME) ?: return false
         val args = intent.getBundleExtra(KEY_SCENE_ARGS)
         val route = onStartSceneFromIntent(sceneName, args) ?: return false
@@ -208,60 +208,9 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
     /** 子类可以在这里拦下返回键（抽屉开着时先关抽屉） */
     protected open fun onInterceptBack(): Boolean = false
 
-    override val sceneCount: Int
+    /** 返回栈深度：栈空表示宿主还没压过任何页面（守卫链要先跑） */
+    val sceneCount: Int
         get() = navController.size
-
-    override val topSceneClass: Class<*>?
-        get() = navController.currentRoute?.let(::compatSceneClassOf)
-
-    override val topScene: SceneFragment?
-        get() {
-            val route = navController.currentRoute ?: return null
-            return compatSceneKeyOf(route)?.let { sceneIndex[it] }
-        }
-
-    override fun indexOfScene(scene: SceneFragment): Int {
-        val route = routeOf(scene) ?: return -1
-        return navController.indexOf(route)
-    }
-
-    override fun startScene(announcer: Announcer, horizontal: Boolean) {
-        pushRoute(routeOf(announcer))
-    }
-
-    override fun startSceneFirstly(announcer: Announcer) {
-        navController.clearAboveRoot()
-        pushRoute(routeOf(announcer))
-    }
-
-    override fun finishScene(scene: SceneFragment) {
-        val route = routeOf(scene) ?: return
-        // 栈底不弹出，改成收掉整个 Activity——与旧 StageActivity 的行为一致
-        if (navController.size > 1) {
-            navController.popRoute(route)
-        } else {
-            finish()
-        }
-    }
-
-    override fun onSceneViewCreated(scene: SceneFragment, savedInstanceState: Bundle?) {
-        val route = routeOf(scene) ?: return
-        compatSceneKeyOf(route)?.let { sceneIndex[it] = scene }
-    }
-
-    override fun onSceneViewDestroyed(scene: SceneFragment) {
-        val route = routeOf(scene)
-        if (route != null) {
-            compatSceneKeyOf(route)?.let { sceneIndex.remove(it) }
-        }
-    }
-
-    override fun onSceneDestroyed(scene: SceneFragment) {
-        val route = routeOf(scene)
-        if (route != null) {
-            compatSceneKeyOf(route)?.let { sceneIndex.remove(it) }
-        }
-    }
 
     /** 压一个页面；栈空时先跑守卫链 */
     protected fun pushRoute(route: EhRoute) {
@@ -280,12 +229,6 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
         if (onInterceptBack()) {
             return
         }
-        val scene = topScene
-        if (scene != null) {
-            // 默认实现走 finish() → finishScene()；页面也可以自己拦下（比如收起搜索框）
-            scene.onBackPressed()
-            return
-        }
         if (navController.size > 1) {
             navController.pop()
         } else {
@@ -294,15 +237,13 @@ abstract class EhNavHostActivity : EhActivity(), SceneHost, EhNavigatorProvider 
         }
     }
 
-    override fun onProvideAssistContent(outContent: AssistContent) {
-        super.onProvideAssistContent(outContent)
-        topScene?.onProvideAssistContent(outContent)
-    }
-
     companion object {
         const val ACTION_START_SCENE = "start_scene"
         const val KEY_SCENE_NAME = "stage_activity_scene_name"
         const val KEY_SCENE_ARGS = "stage_activity_scene_args"
+
+        /** `Intent` 直接携带的 route 载荷（CBOR，见 [encodeRoute]） */
+        const val KEY_SCENE_ROUTE = "stage_activity_scene_route"
     }
 }
 
@@ -367,73 +308,19 @@ private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStac
             entry<EhRoute.WebViewSignIn> { WebViewSignInScene() }
             entry<EhRoute.Security> { SecurityScene(it) }
             entry<EhRoute.History> { HistoryScene() }
+            entry<EhRoute.Favorites> { FavoritesScene() }
             entry<EhRoute.Downloads> { DownloadsScene(it) }
-
-            // 迁移期其余页面仍是旧 Scene，统一走兼容承载（P7-c 后逐条替换）
-            entry<EhRoute.Favorites> { CompatSceneEntry(it) }
-            entry<EhRoute.Downloads> { CompatSceneEntry(it) }
-            entry<EhRoute.GalleryList> { CompatSceneEntry(it) }
-            entry<EhRoute.GalleryDetail> { CompatSceneEntry(it) }
-            entry<EhRoute.GalleryInfo> { CompatSceneEntry(it) }
-            entry<EhRoute.GalleryPreviews> { CompatSceneEntry(it) }
-            entry<EhRoute.GalleryComments> { CompatSceneEntry(it) }
-            entry<EhRoute.Progress> { CompatSceneEntry(it) }
-            entry<EhRoute.Reader> { CompatSceneEntry(it) }
+            entry<EhRoute.GalleryComments> { GalleryCommentsScene(it) }
+            entry<EhRoute.GalleryDetail> { GalleryDetailScene(it) }
+            entry<EhRoute.GalleryInfo> { GalleryInfoScene(it) }
+            entry<EhRoute.GalleryList> { GalleryListScene(it) }
+            entry<EhRoute.GalleryPreviews> { GalleryPreviewsScene(it) }
+            entry<EhRoute.Progress> { ProgressScene(it) }
+            entry<EhRoute.Reader> { ReaderRoute(it) }
+            // 设置：首页与关于页已经是纯 Compose，分类页过渡期仍由 SettingsActivity 承载
+            entry<EhRoute.Settings> { SettingsScene() }
+            entry<EhRoute.SettingsCategory> { SettingsCategoryScene(it) }
+            entry<EhRoute.About> { AboutScene() }
         },
     )
 }
-
-/**
- * 兼容承载：把一个还没出壳的旧 `SceneFragment` 当成 Nav3 的一个 entry 渲染。
- *
- * 每个 entry 一个 `FragmentContainerView`：fragment 由 `FragmentFactory` 反射创建，
- * 入参由 route 编解码得到（[toLegacyArgs]）。entry 离开返回栈时立刻 remove fragment，
- * 所以生命周期与 entry 严格一致——这是双栈时代最缺的一条保证。
- *
- * P7-c 把页面换成纯 @Composable 之后，这个组合项整体删掉。
- */
-@Composable
-internal fun CompatSceneEntry(route: EhRoute, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val fragmentManager = remember(context) { (context as FragmentActivity).supportFragmentManager }
-    val className = compatSceneClassNameOf(route) ?: return
-    // tag / 容器 id 用带参数的 key，反射实例化仍然要类名
-    val key = compatSceneKeyOf(route) ?: return
-    val container = remember(fragmentManager, key) {
-        FragmentContainerView(context).apply { id = compatContainerIdOf(key) }
-    }
-    DisposableEffect(fragmentManager, key) {
-        // 等 View 挂上窗口再提交事务，避免打断 FragmentManager 正在执行的批次
-        val attach = Runnable {
-            if (fragmentManager.isStateSaved) return@Runnable
-            val existing = fragmentManager.findFragmentByTag(key)
-            val fragment = existing ?: fragmentManager.fragmentFactory
-                .instantiate(context.classLoader, className)
-                .apply { arguments = route.toLegacyArgs(cachedGalleryDetail(route)) }
-            // 旋转重建时 fragment 由 FragmentManager 先恢复出来（还没有 View），
-            // 这里重新 add 一次把 View 挂到新容器上
-            if (fragment.view?.parent !== container) {
-                fragmentManager.commitNow { add(container, fragment, key) }
-            }
-        }
-        container.post(attach)
-        onDispose {
-            container.removeCallbacks(attach)
-            val fragment = fragmentManager.findFragmentByTag(key)
-            if (fragment != null && !fragmentManager.isStateSaved) {
-                fragmentManager.commitNow { remove(fragment) }
-            }
-        }
-    }
-    AndroidView(modifier = modifier, factory = { container })
-}
-
-/**
- * 兼容承载容器的 View id。
- *
- * 不能用 `View.generateViewId()`：旋转重建时 FragmentManager 会先把旧 fragment
- * 恢复出来，它记着的 `mContainerId` 必须能在新视图树里找到，否则 fragment 一直拿不到
- * 容器、页面就是一片空白。所以这里用「类名哈希 + 固定高位」推导出稳定 id——
- * 高位取 `0x01` 保证不会撞上 `R.id.*`（都是 `0x7f` 开头）。
- */
-private fun compatContainerIdOf(key: String): Int = 0x01000000 or (key.hashCode() and 0x00FFFFFF)
