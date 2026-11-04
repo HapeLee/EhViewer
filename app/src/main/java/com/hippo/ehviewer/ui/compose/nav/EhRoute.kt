@@ -139,8 +139,7 @@ sealed interface EhRoute : NavKey {
     /**
      * 设置首页。
      *
-     * 首页与 [About] 已经是纯 Compose；分类页还没迁完，点进去仍由
-     * [SettingsPage] 交给老的 `SettingsActivity`，最后一个分类页迁完时两者一起删。
+     * 首页、[About] 与全部分类子页都是纯 Compose，老的 `SettingsActivity` 已经删掉。
      */
     @Serializable
     data object Settings : EhRoute
@@ -148,9 +147,7 @@ sealed interface EhRoute : NavKey {
     /**
      * 设置分类页。
      *
-     * [page] 决定内容：五个分类页（Eh / Read / Privacy / Download / Advanced）都已经就地
-     * 渲染；只剩 uconfig、mytags、filter、security 四个编辑器还由 `SettingsActivity`
-     * 承载，见 [SettingsPage]。
+     * [page] 决定内容，九个分类子页都由 `SettingsCategoryScene` 就地渲染，见 [SettingsPage]。
      */
     @Serializable
     data class SettingsCategory(val page: SettingsPage) : EhRoute
@@ -163,10 +160,8 @@ sealed interface EhRoute : NavKey {
 /**
  * 设置的全部子页。
  *
- * 这个枚举同时是 [EhRoute.SettingsCategory] 的载荷与过渡期的分流表：
- * `SettingsActivity` 只认得还没迁的四个编辑器，分类页一律返回 `null` 并自行结束
- * （`createFragment` 的 `when` 是穷尽的，加页时会强制这里跟着改）。
- * 等这四个编辑器也换成 Compose，`SettingsActivity` 与 `SettingsPage` 一起消失。
+ * 这个枚举就是 [EhRoute.SettingsCategory] 的载荷：`SettingsCategoryScene` 的 `when`
+ * 是穷尽的，加页时编译器会强制那里跟着补一条分支（不会再出现「点进去是空白壳」）。
  */
 @Serializable
 enum class SettingsPage {

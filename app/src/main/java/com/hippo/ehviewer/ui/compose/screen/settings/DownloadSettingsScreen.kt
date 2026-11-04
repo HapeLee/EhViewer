@@ -47,78 +47,86 @@ fun DownloadSettingsScreen(
     val resources = LocalResources.current
 
     SettingsScaffold(titleRes = R.string.settings_download, onBack = onBack) {
-        PreferenceRow(
-            title = stringResource(R.string.settings_download_download_location),
-            summary = downloadLocationUri
-                ?: stringResource(R.string.settings_download_invalid_download_location),
-            onClick = onOpenLocation,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_MEDIA_SCAN,
-            default = false,
-            titleRes = R.string.settings_download_media_scan,
-            summaryOn = stringResource(R.string.settings_download_media_scan_summary_on),
-            summaryOff = stringResource(R.string.settings_download_media_scan_summary_off),
-            onChange = onMediaScanChanged,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_MULTI_THREAD_DOWNLOAD,
-            default = 3,
-            titleRes = R.string.settings_download_concurrency,
-            entriesRes = R.array.multi_thread_download_entries,
-            valuesRes = R.array.multi_thread_download_entry_values,
-            summaryFormat = { entry ->
-                resources.getString(R.string.settings_download_concurrency_summary, entry)
-            },
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_DOWNLOAD_DELAY,
-            default = 1000,
-            titleRes = R.string.settings_download_download_delay,
-            entriesRes = R.array.download_delay_entries,
-            valuesRes = R.array.download_delay_entry_values,
-            summaryFormat = { entry ->
-                resources.getString(R.string.settings_download_download_delay_summary, entry)
-            },
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_DOWNLOAD_TIMEOUT,
-            default = 60,
-            titleRes = R.string.settings_download_download_timeout,
-            range = 20..120,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_PRELOAD_IMAGE,
-            default = 5,
-            titleRes = R.string.settings_download_preload_image,
-            entriesRes = R.array.preload_image_entries,
-            valuesRes = R.array.preload_image_entry_values,
-            summaryFormat = { entry ->
-                resources.getString(R.string.settings_download_preload_image_summary, entry)
-            },
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_DOWNLOAD_ORIGIN_IMAGE,
-            default = 0,
-            titleRes = R.string.settings_download_download_origin_image,
-            entriesRes = R.array.download_origin_image_entries,
-            valuesRes = R.array.download_origin_image_entry_values,
-            summaryFormat = { entry ->
-                resources.getString(R.string.settings_download_download_origin_image_summary, entry)
-            },
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_download_restore_download_items),
-            summary = stringResource(R.string.settings_download_restore_download_items_summary),
-            enabled = !running,
-            onClick = onRestoreDownload,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_download_clean_redundancy),
-            summary = stringResource(R.string.settings_download_clean_redundancy_summary),
-            enabled = !running,
-            onClick = onCleanRedundancy,
-        )
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_download_download_location),
+                summary = downloadLocationUri
+                    ?: stringResource(R.string.settings_download_invalid_download_location),
+                onClick = onOpenLocation,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_MEDIA_SCAN,
+                default = false,
+                titleRes = R.string.settings_download_media_scan,
+                summaryOn = stringResource(R.string.settings_download_media_scan_summary_on),
+                summaryOff = stringResource(R.string.settings_download_media_scan_summary_off),
+                onChange = onMediaScanChanged,
+            )
+        }
+
+        SettingsGroup {
+            ListPreferenceRow(
+                key = Settings.KEY_MULTI_THREAD_DOWNLOAD,
+                default = 3,
+                titleRes = R.string.settings_download_concurrency,
+                entriesRes = R.array.multi_thread_download_entries,
+                valuesRes = R.array.multi_thread_download_entry_values,
+                summaryFormat = { entry ->
+                    resources.getString(R.string.settings_download_concurrency_summary, entry)
+                },
+            )
+            ListPreferenceRow(
+                key = Settings.KEY_DOWNLOAD_DELAY,
+                default = 1000,
+                titleRes = R.string.settings_download_download_delay,
+                entriesRes = R.array.download_delay_entries,
+                valuesRes = R.array.download_delay_entry_values,
+                summaryFormat = { entry ->
+                    resources.getString(R.string.settings_download_download_delay_summary, entry)
+                },
+            )
+            SliderPreferenceRow(
+                key = Settings.KEY_DOWNLOAD_TIMEOUT,
+                default = 60,
+                titleRes = R.string.settings_download_download_timeout,
+                range = 20..120,
+            )
+            ListPreferenceRow(
+                key = Settings.KEY_PRELOAD_IMAGE,
+                default = 5,
+                titleRes = R.string.settings_download_preload_image,
+                entriesRes = R.array.preload_image_entries,
+                valuesRes = R.array.preload_image_entry_values,
+                summaryFormat = { entry ->
+                    resources.getString(R.string.settings_download_preload_image_summary, entry)
+                },
+            )
+            ListPreferenceRow(
+                key = Settings.KEY_DOWNLOAD_ORIGIN_IMAGE,
+                default = 0,
+                titleRes = R.string.settings_download_download_origin_image,
+                entriesRes = R.array.download_origin_image_entries,
+                valuesRes = R.array.download_origin_image_entry_values,
+                summaryFormat = { entry ->
+                    resources.getString(R.string.settings_download_download_origin_image_summary, entry)
+                },
+            )
+        }
+
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_download_restore_download_items),
+                summary = stringResource(R.string.settings_download_restore_download_items_summary),
+                enabled = !running,
+                onClick = onRestoreDownload,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_download_clean_redundancy),
+                summary = stringResource(R.string.settings_download_clean_redundancy_summary),
+                enabled = !running,
+                onClick = onCleanRedundancy,
+            )
+        }
     }
 }
 

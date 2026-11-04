@@ -37,11 +37,8 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.animation.Interpolator;
 
 import androidx.annotation.NonNull;
-import androidx.core.content.ContextCompat;
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 import androidx.interpolator.view.animation.LinearOutSlowInInterpolator;
-
-import com.hippo.ehviewer.R;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +68,10 @@ public class LockPatternView extends View {
      * It didn't seem to have much impact on the devices tested, so currently set to 0.
      */
     private static final float DRAG_THRESHOLD = 0.0f;
+    /** 没人调 {@link #setPatternColors} 时的兜底三态色（54% 黑 / 主题青 / 红） */
+    private static final int DEFAULT_REGULAR_COLOR = 0x8A000000;
+    private static final int DEFAULT_SUCCESS_COLOR = 0xFF009688;
+    private static final int DEFAULT_ERROR_COLOR = 0xFFF44336;
     private final Cell[][] mCells;
     private final CellState[][] mCellStates;
     private final int mDotSize;
@@ -91,9 +92,9 @@ public class LockPatternView extends View {
     private final Rect mInvalidate = new Rect();
     private final Rect mTmpInvalidateRect = new Rect();
     private final int mAspect;
-    private final int mRegularColor;
-    private final int mErrorColor;
-    private final int mSuccessColor;
+    private int mRegularColor;
+    private int mErrorColor;
+    private int mSuccessColor;
     private final Interpolator mFastOutSlowInInterpolator;
     private final Interpolator mLinearOutSlowInInterpolator;
     private boolean mDrawingProfilingStarted = false;
@@ -139,9 +140,12 @@ public class LockPatternView extends View {
         mPathPaint.setAntiAlias(true);
         mPathPaint.setDither(true);
 
-        mRegularColor = ContextCompat.getColor(context, R.color.lock_pattern_view_regular_color);
-        mErrorColor = ContextCompat.getColor(context, R.color.lock_pattern_view_error_color);
-        mSuccessColor = ContextCompat.getColor(context, R.color.lock_pattern_view_success_color);
+        // 默认值只是「没人调 setPatternColors 时」的兜底，不再读 R.color —— 那三个色值
+        // 以前靠 values / values-night 两套 XML 撑明暗，现在明暗由 Compose 主题决定，
+        // 调用方（AndroidView 的 update）会把 MaterialTheme 的颜色传进来
+        mRegularColor = DEFAULT_REGULAR_COLOR;
+        mErrorColor = DEFAULT_ERROR_COLOR;
+        mSuccessColor = DEFAULT_SUCCESS_COLOR;
 
         mPathPaint.setColor(mRegularColor);
 
@@ -149,12 +153,13 @@ public class LockPatternView extends View {
         mPathPaint.setStrokeJoin(Paint.Join.ROUND);
         mPathPaint.setStrokeCap(Paint.Cap.ROUND);
 
-        mPathWidth = getResources().getDimensionPixelSize(R.dimen.lock_pattern_dot_line_width);
+        // 尺寸也内联成 dp 字面量：这个 View 是最后一个还在读 R.dimen 的老控件，
+        // 整套 dimens.xml 已经随旧布局一起删了
+        mPathWidth = dp(3);
         mPathPaint.setStrokeWidth(mPathWidth);
 
-        mDotSize = getResources().getDimensionPixelSize(R.dimen.lock_pattern_dot_size);
-        mDotSizeActivated = getResources().getDimensionPixelSize(
-                R.dimen.lock_pattern_dot_size_activated);
+        mDotSize = dp(12);
+        mDotSizeActivated = dp(28);
 
         mPaint.setAntiAlias(true);
         mPaint.setDither(true);
@@ -177,6 +182,32 @@ public class LockPatternView extends View {
 
         mFastOutSlowInInterpolator = new FastOutSlowInInterpolator();
         mLinearOutSlowInInterpolator = new LinearOutSlowInInterpolator();
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    /**
+     * 覆盖三态颜色（常规 / 成功 / 错误）。
+     *
+     * 原来这套颜色是构造里从 {@code R.color.lock_pattern_view_*} 读的静态值：常规色只有
+     * 54% 黑，深色页面上几乎看不见，成功色也钉死在 {@code colorPrimary} 的 teal 上。
+     * 主题交给 Compose 之后，构造里不再碰资源，调用方（{@code AndroidView} 的 update）
+     * 从 {@code MaterialTheme.colorScheme} 把颜色传进来。
+     */
+    public void setPatternColors(int regularColor, int successColor, int errorColor) {
+        if (mRegularColor == regularColor && mSuccessColor == successColor
+                && mErrorColor == errorColor) {
+            return;
+        }
+        mRegularColor = regularColor;
+        mSuccessColor = successColor;
+        mErrorColor = errorColor;
+        // 描边色只在 drawPattern 里按 `getCurrentColor` 覆盖，非绘制路径（未拖拽时的
+        // 静态点）用的是这个初始值，所以这里也要同步一次
+        mPathPaint.setColor(regularColor);
+        invalidate();
     }
 
     /**

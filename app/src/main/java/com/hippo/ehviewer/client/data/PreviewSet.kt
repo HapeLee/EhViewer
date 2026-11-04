@@ -15,13 +15,17 @@
  */
 package com.hippo.ehviewer.client.data
 
-import com.hippo.widget.LoadImageView
-
+/**
+ * 详情页 / 预览页的缩略图集合。
+ *
+ * 只保留「描述」类接口：Compose 侧（`GalleryPreviewsScreen`）拿 [getGalleryPreview]
+ * 自己拼 Coil 的 `ImageRequest`。旧的 `load(view: LoadImageView, …)`（把图直接塞进
+ * `LoadImageView`）随老控件一起删了。
+ */
 abstract class PreviewSet {
     abstract fun size(): Int
     abstract fun getPosition(index: Int): Int
     abstract fun getPageUrlAt(index: Int): String
     abstract fun getSha1At(index: Int): String
     abstract fun getGalleryPreview(gid: Long, index: Int): GalleryPreview
-    abstract fun load(view: LoadImageView, gid: Long, index: Int)
 }

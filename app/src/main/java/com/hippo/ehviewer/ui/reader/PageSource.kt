@@ -81,6 +81,15 @@ private const val PAGE_TIMEOUT_MS = 120_000L
 interface PageSource : Closeable {
     val count: Int
 
+    /**
+     * 画廊标题，给顶栏胶囊用。
+     *
+     * 拿不到就返回空串（压缩包那种没有元数据的来源），顶栏会退回页码显示——
+     * 这里不要为「标题」去发额外请求，它只是个装饰。
+     */
+    val title: String
+        get() = ""
+
     /** 上次读到的位置；入口没指定页码时的起始页 */
     val startPage: Int
         get() = 0
@@ -135,6 +144,27 @@ interface PageSource : Closeable {
 
 /** [PageSource.progress] 的载荷：[percent] 为 null 表示不确定进度 */
 data class PageProgress(val index: Int, val percent: Int?)
+
+/** 阅读器缓存根目录；每次会话一个子目录，页源关闭时自删 */
+private fun readerCacheRoot(context: Context): File = File(context.cacheDir, "reader")
+
+/**
+ * 一次阅读会话的缓存目录。
+ *
+ * 不直接读全局 `ImageLoader` 的磁盘缓存：下载 / 解压出来的原图要能被 telephoto 的
+ * 区域解码随机访问，而 Coil 的磁盘缓存是流式写的不保证这一点。
+ */
+fun readerCacheDir(context: Context, key: String): File = File(readerCacheRoot(context), key)
+
+/**
+ * 清掉上一次进程留下的阅读器缓存。
+ *
+ * 正常退出时 `PageSource.close()` 会删掉自己的目录，但进程被杀 / 崩溃时来不及执行——
+ * 一个 400 页的画廊能留下几百 MB 的副本。应用启动时（此时一定没有活跃阅读器）整体清一次。
+ */
+fun clearReaderCache(context: Context) {
+    runCatching { readerCacheRoot(context).deleteRecursively() }
+}
 
 /**
  * 压缩包页源：把 [ArchiveSession] 的条目按需解到缓存目录。
@@ -350,6 +380,11 @@ class OnlinePageSource(
     override val count: Int
         get() = if (ready) pageCount else 0
 
+    // 入口传进来的 `GalleryInfo` 往往只有 gid/token，`SpiderInfo` 里也没有标题字段，
+    // 所以在线来源通常拿不到标题；真正的兜底在 `ReaderRoute`（按 gid 查历史）。
+    override val title: String
+        get() = galleryInfo.title.orEmpty()
+
     override val startPage: Int
         get() = if (ready) queen.startPage else 0
 
@@ -401,6 +436,12 @@ class OnlinePageSource(
     override fun close() {
         queen.removeOnSpiderListener(listener)
         releaseSpiderQueen(queen, SpiderQueen.MODE_READ)
+        // 把还在等页的协程全部叫醒：queen 已经 release，再也不会有人调 finish()，
+        // 否则它们要各自空等到 120s 超时（旋转重建时正好会留下这种僵尸协程）
+        synchronized(lock) {
+            pending.values.forEach { it.completeExceptionally(IOException("Page source closed")) }
+            pending.clear()
+        }
         cacheDir.deleteRecursively()
     }
 
@@ -444,6 +485,10 @@ class DownloadPageSource(
 
     override val count: Int
         get() = files.size
+
+    // 下载目录名就是「画师 - 标题」那一串，是这里唯一现成的标题
+    override val title: String
+        get() = dir.name.orEmpty()
 
     override suspend fun prepare(): Boolean = withContext(Dispatchers.IO) {
         files = scan()

@@ -1091,3 +1091,55 @@ PrefDelegate<T>
 迁完就能删 `SettingsActivity`、`SettingsPage`、`activity_preference.xml` 与
 `themes_override.xml` 里那几条 Preference 样式。
 
+### 11.7 落地记录：四个编辑器出壳，删 `SettingsActivity`（2026-11-02）
+
+§11.6 剩下的四个编辑器全部换成 Compose，`SettingsCategoryScene` 的 `when` 因此变成穷尽的
+九个分支；`SettingsActivity` / `BaseFragment` 那条「起 Activity 再立刻弹栈」的过渡桥整条删除。
+
+| 位置 | 改动 |
+| --- | --- |
+| `ui/compose/screen/settings/WebEditorScreen.kt` + `ui/page/settings/WebEditorScene.kt` | UConfig / 我的标签共用：WebView 经 `AndroidView` 挂载，config 里只有三处差异（是否显示「应用」、是否允许同 host 跳转、离开时是否长期化 `cloudflare` / `settings_profile` cookie） |
+| `ui/compose/screen/settings/SecurityPatternScreen.kt` | 手势锁设置：`LockPatternView` 用 `AndroidView` 挂进 320dp 见方的盒子，按钮与指纹勾选换成 M3 |
+| `ui/compose/screen/settings/FilterSettingsScreen.kt` + `ui/page/settings/FilterSettingsViewModel.kt` | 过滤器：`LazyColumn` 列表 + 空态大图 + FAB + 信息/添加/删除三个对话框；VM 负责「内存快照 + 写库后重建」 |
+| `ui/page/settings/SettingsCategoryScene.kt` | 新增 `FilterSettingsScene` / `SecurityPatternScene`，删掉 `LegacySettingsPage` 与 `else` 分支 |
+| `client/EhFilter.kt` | `MODE_TITLE` / `MODE_TAG_NAMESPACE` / `MODE_COMMENT` 从 private 放开（六个编号就是数据库 MODE 值与 `array/filter_entries` 下标） |
+| `AndroidManifest.xml` / `ClipboardUtil.kt` | 删 `SettingsActivity` 条目（未 exported、无 intent-filter）；剪贴板提示去掉 `is SettingsActivity` 分支 |
+| 删除 | `SettingsActivity`、`BaseFragment`、`FilterFragment`、`SetSecurityFragment`、`UConfigFragment`、`MyTagsFragment`、`activity_preference.xml`、`activity_filter.xml`、`item_filter.xml`、`item_filter_header.xml`、`dialog_add_filter.xml`、`activity_set_security.xml`（含 `layout-land`）、`menu/activity_filter.xml`、`themes_override.xml` 的 `PreferenceSummaryTextStyle` |
+
+几个决定：
+
+1. **`SettingsPage` 留着，`SettingsActivity` 删掉**。原计划是「两者一起消失」，但 `SettingsPage`
+   现在只是 `EhRoute.SettingsCategory` 的 `@Serializable` 载荷（枚举名进返回栈），删了就得给九个
+   子页各开一个 route。它已经不再承担「分流表」职责，`createFragment` 那张表随 Activity 一起没了。
+2. **手势锁与两个 WebView 页必须用 `AndroidView`**。`LockPatternView` 是自绘 canvas 的老控件，
+   `WebView` 更不可能重画；这两处只换外层壳（顶栏、按钮、提示），控件本身原样复用。
+3. **清除图案的口径照抄**：`cellSize <= 1` 视为清除（单点构不成图案），指纹开关只有在
+   「生物识别可用 && 用户勾选 && 图案非空」时才可能落成 true。初始图案用
+   `LockPatternUtils.stringToPattern(Settings.security)` 回填，与老 Fragment 的 `onCreateView` 一致。
+4. **过滤器页不复制 `Filter` 对象进 UI**。`Filter` 是可变的 Room 实体（`triggerFilter` 就地改
+   `enable`），UI 拿到它就会出现「改了字段但没重组」；`FilterSettingsViewModel` 把它摊平成
+   `FilterEntry.Item(id, text, label, enabled)` 值拷贝，操作按 `id` 回查内存实例。
+5. **写库串行化**。`EhFilter` 的 `@Synchronized` 只保护单次调用，读快照与写在两个 IO 线程交错会
+   读到半截 `ArrayList`，所以 VM 用一个 `Mutex` 把本页所有库操作串起来；首次 `snapshot()` 顺带把
+   `EhFilter` 的类初始化（`runBlocking` 读库）挪到 IO 线程。
+6. **添加失败不关对话框**。老实现靠 `TextInputLayout.error` 留在原地，Compose 侧让 `onAdd` 带
+   `onResult(Boolean)` 回调：`false` 就把「已存在」写进 `supportingText`，用户不用重开对话框。
+7. **未知模式沿用「有内容才出标题」**：六个分组各自「非空才出标题」并保持老顺序
+   （标题 → 上传者 → 标签 → 标签命名空间 → 评论者 → 评论），未启用的条目文字带删除线，
+   与 `MaterialCheckBox` 未勾选时的老样子对齐。
+
+已知取舍：
+
+- UConfig 的「应用」只在 `onPageFinished` 之后才真正执行脚本；在此之前点它没有任何反应
+  （按钮不禁用、也没有转圈），与老实现「点了可能没反应」的表现一致，但没有变好。
+- 手势锁页没有回显「当前图案已设置」——老页面也没有，只是把已存的图案点亮在控件里。
+- 过滤器页首帧会短暂显示空态（`entries` 初始为空，IO 快照到达后切到列表）；老的
+  `ViewTransition` 是「先列表后 tip」，但那时 `EhFilter` 已在 `onCreateView` 里同步可用。
+- `themes_override.xml` 里给 `MaterialCheckBox` / `MaterialRadioButton` 的两条 override 保留：
+  `widget_advance_search_table.xml` 仍在用 `MaterialCheckBox`（`AdvanceSearchTable` 尚未退役）。
+
+**验证**：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿（`spotlessApply` 只重排了 `FilterSettingsViewModel` 里一个 `apply` 块）。
+仍未跑真机：设置 → 隐私 → 手势锁（设置 / 清除 / 指纹联动 / 返回）、设置 → 过滤器（启停划线、
+重复添加原地报错、删除确认、FAB 与空态切换、标签翻译开关）、UConfig 与我的标签的 cookie 落盘。
+

@@ -29,8 +29,8 @@ import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
 import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.encodeRoute
+import com.hippo.ehviewer.ui.compose.theme.ehToolbarColor
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
-import rikka.core.res.resolveColor
 
 object UrlOpener {
     /** 阅读器也在 NavHost 里了，URL 命中「本画廊第几页」时压它的 route，不再起 Activity */
@@ -83,7 +83,7 @@ object UrlOpener {
         val customTabsIntent = CustomTabsIntent.Builder()
         customTabsIntent.setShowTitle(true)
         val params = CustomTabColorSchemeParams.Builder()
-            .setToolbarColor(context.theme.resolveColor(R.attr.toolbarColor))
+            .setToolbarColor(ehToolbarColor(context))
             .build()
         customTabsIntent.setDefaultColorSchemeParams(params)
         customTabsIntent.setColorScheme(if (isNight) CustomTabsIntent.COLOR_SCHEME_DARK else CustomTabsIntent.COLOR_SCHEME_LIGHT)

@@ -17,14 +17,17 @@ package com.hippo.ehviewer.shortcuts
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
 import com.hippo.ehviewer.download.DownloadService
 
 /**
  * Created by onlymash on 3/25/18.
+ *
+ * 没有界面（起完服务就 `finish()`），所以只是个 `ComponentActivity`；跟着
+ * `EhActivity` 一起从 `AppCompatActivity` 换过来。
  */
-class ShortcutsActivity : AppCompatActivity() {
+class ShortcutsActivity : ComponentActivity() {
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val action: String? = intent?.action

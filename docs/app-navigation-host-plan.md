@@ -1,8 +1,9 @@
 # 应用级导航宿主方案（P7）
 
-> 状态：P7-a、P7-b 前置（宿主接口隔离）、P7-b 主体（宿主换 NavDisplay）、P7-c 第一子片
-> （登录 / 守卫组出壳）与第二子片（历史 / 下载出壳）已落地（见第 10 节）；
-> P7-c 剩余页面（收藏、画廊列表、详情族、阅读器）与 P7-d / P7-e 仍是设计稿。
+> 状态：P7-a、P7-b、P7-c（全部页面）、P7-d（宿主壳）、P7-e（删 Scene 层）都已落地（见第 10 节）。
+> 界面迁移已收尾：`res/layout` 与 `res/menu` 都是 0 个文件，页面 / 宿主壳 / 对话框全部是 Compose，
+> 只剩 `WebView` 与 `LockPatternView` 两处外部控件走 `AndroidView`。三个 Activity
+> （`MainActivity` / `ShortcutsActivity` / `WebViewActivity`）按设计保留。
 > 前置：15 个 Scene 已全部迁到 `EhComposeScene`，XML Scene 清零（见 `compose-kotlin-refactor-plan.md` 第 2 节）。
 > 目标：把「Activity 场景栈 + 每页内部 Nav3 栈」收敛成「单 Activity + 单一 Nav3 栈」，然后删除 `com.hippo.scene`。
 
@@ -848,3 +849,452 @@ context.startActivity(
 
 验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
 `:app:assembleDebug` 全绿。
+
+### 10.23 清理已出壳页面的死 View 层（第二十个落地片）
+
+设置页全部换成 Compose 之后，`SettingsActivity` 那条桥消失，一批「只给旧页面用的
+自定义 View + 布局 + 资源」随之失去唯一消费者。这一片按「**构造点归零**」的口径扫，
+一次删掉整条链（第 10.22 节的 `ReaderScreen` 与 `ehHost()` 两处「未接线」特例在这里
+不受影响——阅读器已经接线）。
+
+| 删除 | 判断依据 |
+| --- | --- |
+| `com/hippo/easyrecyclerview/`（`EasyRecyclerView`、`FastScroller`、`HandlerDrawable`、`LayoutManagerUtils`、`LinearDividerItemDecoration`、`SimpleSmoothScroller`） | 全包只被 `ContentLayout` 引用，包内互引 |
+| `widget/ContentLayout.kt` + `widget_content_layout.xml` | 全仓无实例化点；唯一引用者是 `GalleryInfoContentHelper` |
+| `widget/GalleryInfoContentHelper.kt` | 无实例化点，只剩 `FavoritesViewModel` 注释里的「等价于旧实现」 |
+| `widget/CuteSpinner.java` + `item_cute_spinner_item.xml` | 无实例化点，XML 也不再引用（唯一使用方是已删的 `dialog_add_filter.xml`） |
+| `widget/MaxSizeContainer.java` + `MaxSizeContainer` styleable | 唯一 XML 使用方是已删的 `activity_set_security.xml`，Compose 版用 `Modifier.sizeIn` |
+| `widget/AdvanceSearchTable.kt` + `widget_advance_search_table.xml` | View 无实例化点；只剩 `SH`/`STO`/`SFL`/`SFU`/`SFT` 五个位常量被用 |
+| `attrs.xml` 的 `FastScroller` styleable | 随 `FastScroller` 一起失去消费者 |
+| `colors.xml` 的 7 个 `loading_indicator_*` | 只被 `ContentLayout` 的加载指示器用 |
+| `open_in_webview`（5 个语言） | 只被 `ContentLayout` 的 Cloudflare 对话框用 |
+| `widget/recyclerview/`（`AutoGridLayoutManager`、`AutoStaggeredGridLayoutManager`） | Java 侧构造点归零，只剩 `GalleryPreviewsScreen` / `DownloadsScreen` 注释里的「换成 Lazy\*」 |
+| `widget/AutoWrapLayout.java` + `AutoWrapLayout` styleable | 构造点归零，`GalleryDetailScreen` 注释里的 `FlowRow` 已是替代品 |
+| `widget/CheckTextView.kt` + `CheckTextView` styleable | 构造点归零，分类表已由 `SearchPanel` 的 chip 取代 |
+| `widget/BatteryView.kt` + `BatteryView` styleable | 构造点归零，抽屉头不再画电量 |
+
+**唯一不是「整类删掉」的**：`AdvanceSearchTable` 的五个位常量搬进
+`client/data/AdvanceSearchFlags.kt`。消费者有三个——`SearchPanel`（10 处）、
+`ListUrlBuilder`（10 处）、单测 `SearchPanelStateTest`（3 处）——它们都只要位值，
+不要那个 `LinearLayout`。位值一个没改（`0x1` / `0x2` / `0x100` / `0x200` / `0x400`），
+因为历史记录与快速搜索里存着的 `advanceSearch` 就是这套位。
+
+**教训**：`src/test` 不在「`src/main` 交叉引用」的扫描范围里，第一遍编译过了、
+`testDebugUnitTest` 才炸出 `Unresolved reference 'AdvanceSearchTable'`。删公开类之前
+必须把 `src/test` / `src/androidTest` 一起算进引用面。
+
+**刻意没动**（属于下一片「散落旧控件」）：
+
+- `IndicatingListView`：仍被 `dialog_list_checkbox_builder.xml` 使用，而那个对话框
+  （`ListCheckBoxDialogBuilder`）还活在 `CommonOperations` 里。
+- `FixedAspectImageView` / `LoadImageView` / `Slider` / `ObservedTextView`：
+  互相继承或仍被在用的 XML 引用，`LoadImageView` 还有 5 处 Java 侧引用。
+- `GalleryRatingBar`（`dialog_rate.xml`）、`dialog_archive_list.xml`、`dialog_torrent_list.xml`：
+  属于「详情页三个对话框迁 Compose」，与 `CommonOperations` 里的四个
+  `*DialogBuilder` 一起做才划算。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿（删除后重编 47s，无新增告警）。
+
+### 10.24 P7-d 落地：宿主壳换成 Compose（第二十一个落地片）
+
+`activity_main.xml` 那张「`DrawerLayout` + `NavigationView` + `CoordinatorLayout` + `ComposeView`」
+四层壳整张换成一个 `@Composable`：`ui/host/MainShell.kt`。
+
+| 旧 | 新 |
+| --- | --- |
+| `DrawerLayout` + `IgnoreFitsSystemWindowsFullyDraggableDrawerContentLayout` | `ModalNavigationDrawer`（`gesturesEnabled` = 旧的 `LOCK_MODE_UNLOCKED / LOCKED_CLOSED`） |
+| `NavigationView` + `menu/nav_drawer_main.xml` | `ModalDrawerSheet` + `NavigationDrawerItem` + `NAV_ENTRIES`（8 条，顺序与旧菜单一致） |
+| `nav_header_main.xml`（`LoadImageView` 头像 + 昵称 + 月亮按钮） | `DrawerHeader`：`Image`/`AsyncImage` + `Text` + `IconButton` |
+| `CoordinatorLayout` 里的 `@id/snackbar` | `SnackbarHost(snackbarHostState)`，与页面共用同一个 `SnackbarHostState` |
+| `setContentView` + `findViewById<ComposeView>(R.id.nav_host)` | `EhNavHostActivity.setContent { EhTheme { shell { … } } }` |
+| `NavigationView.OnNavigationItemSelectedListener` | `MainShell(onNavSelect = …)` |
+
+接口收窄（`EhHost` / `EhHostState`）：
+
+- `setDrawerLockMode(lockMode, edgeGravity)` → `setLeftDrawerEnabled(enabled: Boolean)`；
+- `openDrawer/closeDrawer/toggleDrawer(gravity)` → `openLeftDrawer/closeLeftDrawer/toggleLeftDrawer()`；
+- 删 `addAboveSnackView` / `removeAboveSnackView`（那套「把 FAB 顶到 Snackbar 之上」是
+  `CoordinatorLayout` 的机制，Compose 页面各自用 `Scaffold` 管浮层）；
+- 四个调用点（`GalleryListScene` / `FavoritesScene` / `HistoryScene` / `DownloadsScene`）
+  的 `toggleDrawer(GravityCompat.START)` 改成 `toggleLeftDrawer()`，`GravityCompat` import 一并删。
+
+几个决定：
+
+1. **导航勾选项仍用 `@IdRes Int`**。`nav_homepage` … `nav_settings` 这 8 个 id 原本由
+   `menu/nav_drawer_main.xml` 顺带声明，菜单删掉后挪到新建的 `values/ids.xml`。
+   换成枚举要同时改 `EhRoute.navCheckedItem`、`GalleryListViewModel.navCheckedRes` 与 4 个
+   Scene，收益只有「更好看」，不值得在这一片里连带 5 个文件。
+2. **壳状态全部上移到 `MainActivity` 的 Compose 状态**：`DrawerState` / `drawerEnabled` /
+   `checkedNavId` / `profileVersion`（只是头像昵称的重读信号，Settings 不是 Compose 状态），
+   通过 `shell()` 交给 `MainShell`。`EhNavHostActivity` 新增 `HostShell` typealias 与
+   `protected open fun shell(): HostShell = { it }`，子类只覆写壳、不碰 `setContent`。
+3. **抽屉开着时提示走 Toast**，否则走 Snackbar——这是旧 `showTip` 的原逻辑（Snackbar 会被
+   抽屉盖住），没有改。
+4. **两个自检提示改成带 action 的 Snackbar**：计量网络警告（action → 流量设置面板）与
+   剪贴板画廊链接（action → 打开），用 `showSnackbar(...) == SnackbarResult.ActionPerformed`
+   判断；`lifecycleScope` 保证 Activity 销毁后不再挂起。
+5. **横向 inset 手动补**：旧 XML 最外层有 `fitsSystemWindowsInsets="start|end"`，Compose 根
+   没有等价物，所以在 `MainShell` 的 content `Box` 上补
+   `windowInsetsPadding(WindowInsets.systemBars.only(Horizontal))`；纵向仍由各页 `Scaffold` 处理。
+6. **删掉 `onSaveInstanceState` 的 `nav_checked_item`**。勾选项由 `EhSceneShell` 的
+   `DisposableEffect(route)` 每次路由变化重设，旋转后 backStack 恢复即自然复原，不需要额外存档。
+7. **删 `MainActivity.onBackPressed` 覆写**：基类的 `onBackPressed` 本来就先问
+   `onInterceptBack()`，抽屉开着时由它返回 `true` 并关闭抽屉。
+
+已知取舍：
+
+- M3 `ModalDrawerSheet` 的默认宽度（全宽减 56dp）比旧 `NavigationView` 的 `wrap_content`
+  略宽；没有为了像素对齐去硬编码宽度。
+- 头像统一按圆形裁切（`clip(CircleShape)`），旧 `LoadImageView` 只是 `centerCrop`；
+  `default_avatar` 本身是圆形，肉眼无差别。
+- 头像加载失败时不再显示占位图（旧 `LoadImageView` 有 error 图）；`AsyncImage` 只给了
+  `model`，失败即空白。要补的话是下一个「头像缓存」小片。
+- 删除的样式与字符串：`ShapeAppearanceOverlay.MaterialComponents.NavigationView`、
+  `ShapeAppearanceOverlay.App.CornerSize50Percent`、`stub`（各语言）。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。真机待回归：抽屉开合与手势锁定（守卫链 / 阅读器 / 设置页应锁住）、
+导航 8 项跳转与勾选态、头像与昵称、月亮按钮三态循环、Snackbar 位置（含 FAB 页面）、
+返回键优先级（抽屉 → 页面栈 → 退出）。
+
+**下一步**（界面侧最后一块）：`CommonOperations` 的四个 `*DialogBuilder`
+（`CheckBoxDialogBuilder` / `EditTextDialogBuilder` / `ListCheckBoxDialogBuilder` /
+`EditTextCheckBoxDialogBuilder`）与它们背后的 5 个 XML 布局，见 10.25；
+`WebViewActivity` 与 `ShortcutsActivity` 保留（前者是「外部浏览器兜底」，后者是透明中转）。
+
+### 10.25 详情页对话框换成 Compose（第二十二个落地片）
+
+详情页原来有 6 个命令式 `AlertDialog`：评分、归档、种子、删除下载、过滤上传者、添加标签、
+有更新版本（7 个，其中「删除下载」是 `CheckBoxDialogBuilder`）。现在全部改成「场景持状态、
+Composable 只渲染」，集中在新建的 `ui/compose/screen/GalleryDetailDialogs.kt`。
+
+| 旧 | 新 |
+| --- | --- |
+| `dialog_rate.xml` + `GalleryRatingBar`（`AppCompatRatingBar` 子类） | `RateDialog`：5 个 `Icon` + 左右半区点击（保留半星），`v_star_x16` / `v_star_half_x16` / `v_star_outline_x16` |
+| `dialog_archive_list.xml` + `ListView` + 手工切三个 View 的可见性 | `ArchiveListDialog` + `ArchiveListState`（`Loading` / `Ready(archives, fundsTitle)` / `Failed`） |
+| `dialog_torrent_list.xml` + `ListView` | `TorrentListDialog` + `TorrentListState` |
+| `item_select_dialog.xml`（`ArrayAdapter` 的 item） | `SelectionList`：`LazyColumn` + `HorizontalDivider` |
+| `CheckBoxDialogBuilder`（删除下载） | `DeleteDownloadDialog`（`Checkbox` + 整行可点） |
+| `AlertDialog.Builder().setMessage(...)`（过滤上传者） | `ConfirmDialog` |
+| `EditText` + `FrameLayout` 手工加内边距（添加标签） | `TextInputDialog`（`OutlinedTextField`，空文本就地报错） |
+| `setItems(...)`（有更新版本） | `ListChoiceDialog` |
+
+场景侧用 7 个 `remember { mutableStateOf(...) }` 持有对话框状态——置空即关闭，与旧实现
+「`AlertDialog` 活不过重建」一致；`vm.loadArchives` / `loadTorrents` 的回调直接写状态
+（回调在主线程，且缓存命中时同步回调，所以点开即出列表）。
+
+几个决定：
+
+1. **半星输入照旧**。每颗星左右各半（左半 `star - 0.5f`、右半 `star`），图标按
+   `rating >= star` / `>= star - 0.5f` / 其它选三种 drawable，`ratingTextRes` 仍是
+   `(rating * 2).roundToInt()` 映射 `rating1..rating10`。
+2. **资金标题在场景里算好再传给 UI**（`Ready.fundsTitle`）。它要拼 `EhUtils.isExHentai`
+   的 `+` 与 `R.string.current_funds`，属于业务口径，不该散进 UI 层。
+3. **`TextInputDialog` 自己校验空文本**（`supportingText` 就地提示），比旧的「关闭对话框
+   再弹 Toast `text_is_empty`」少一次操作。
+4. **`AlertDialog` 的 `title` 用可空的 `let` 构造**：`fundsTitle` 为空时不要一个空标题位。
+5. `GalleryRatingBar`（`AppCompatRatingBar` 子类）、`RatingBarTheme`、四个
+   `dialog_*.xml` 与 `item_select_dialog.xml` 中的三个随本片删除
+   （`item_select_dialog.xml` 还留着，`ListCheckBoxDialogBuilder` 仍在用它）。
+
+已删：`dialog_rate.xml`、`dialog_archive_list.xml`、`dialog_torrent_list.xml`、
+`widget/GalleryRatingBar.java`、`themes.xml` 的 `RatingBarTheme`。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。真机待回归：评分（含半星与未登录提示）、归档列表（缓存命中
+与请求两条路径、失败文案）、种子列表、删除下载的勾选框回写
+`Settings.removeImageFiles`、过滤上传者、添加标签的空文本校验、有更新版本跳转。
+
+**剩余：4 个 `*DialogBuilder`**。它们不是「页面」而是「工具」，API 是命令式的
+（`builder.show()`，调用方事后读 `isChecked` / `getText`），迁移要先选路线：
+
+- **路线 A（真 Compose）**：新增宿主级 `DialogHost`（`CompositionLocal` 或宿主 state），
+  `CommonOperations` 改为往宿主投递「对话框请求」，`CommonOperations` 的十几个调用点
+  从「直接弹」变成「请求弹」。干净，但要改调用点语义。
+- **路线 B（ComposeView 内嵌）**：保留 `AlertDialog.Builder` 与 API，把 `dialog_*.xml`
+  换成 `ComposeView`，并在 `setView` 之前给根 View 设 `ViewTreeLifecycleOwner` /
+  `ViewTreeSavedStateRegistryOwner`（Dialog 的 decorView 没有父链，不设会直接崩）。
+  改动面最小、XML 能清零，但留下「View 里套 Compose」的过渡层。
+
+建议先做 B（一次消掉 5 个 XML、调用点零改动），等宿主 `DialogHost` 在别处有了真实需求
+再升级到 A。
+
+**实际选择：直接做 A。** 见 10.26——`res/layout` 与 `res/menu` 在这片之后都是空的。
+
+### 10.26 宿主级 DialogHost，`res/layout` 清零（第二十三个落地片）
+
+四个 `*DialogBuilder` 走的是「命令式弹框 + 事后读状态」，所以没有采用 10.25 结尾建议的
+路线 B（`ComposeView` 内嵌），而是直接上路线 A：**工具层投递请求，宿主渲染**。
+
+| 新增/改动 | 说明 |
+| --- | --- |
+| `ui/host/DialogHost.kt` | `sealed interface DialogRequest`（`TextInput` / `ListSingleChoice` / `Message`）+ `DialogHost(request, onDismiss)` |
+| `EhHost` / `EhHostState` | 新增 `showDialog(request: DialogRequest)`，`NoOpEhHost` 与 `EhNavHostActivity.hostState` 一并委托 |
+| `MainActivity` | `dialogRequest` 状态 + `showDialog` 实现，在 `shell()` 里紧挨 `MainShell` 渲染 `DialogHost` |
+| `CommonOperations` | 三处命令式弹框（收藏备注、收藏夹选择、下载标签选择）改为 `activity.showDialog(...)` |
+| `MainActivity.onUnrecognizedIntent` | 「无法解析的 URL」从 `EditTextDialogBuilder` 改为 `DialogRequest.TextInput`（确认按钮是「复制」） |
+| `DialogWebChromeClient` | Java → Kotlin，js `alert` / `confirm` / `prompt` 改为 `DialogRequest.Message` / `TextInput` |
+
+删除：`CheckBoxDialogBuilder`、`EditTextDialogBuilder`、`EditTextCheckBoxDialogBuilder`、
+`ListCheckBoxDialogBuilder`（`com/hippo/app` 包随之清空）、`dialog_checkbox_builder.xml`、
+`dialog_edittext_builder.xml`、`dialog_edittextcheckbox_builder.xml`、
+`dialog_list_checkbox_builder.xml`、`item_select_dialog.xml`、`dialog_js_prompt.xml`。
+
+**结果：`res/layout/` 0 个文件、`res/menu/` 0 个文件。** 全仓不再有 XML 布局
+（`res/xml/` 里剩的是备份规则、快捷方式、语言配置这类系统配置，与 UI 无关）。
+
+几个决定：
+
+1. **`DialogRequest` 里全是已解析的字符串**。请求在非 Compose 环境构造（`CommonOperations`
+   拿到的是 `Activity`），所以 `title` / `hint` / `positiveText` 都在调用处 `getString`。
+2. **点按钮先 `onDismiss()` 再回调**，回调里可以安全地再投递一个新请求；`onCancel` 只在
+   「点外部 / 返回键 / 取消按钮」时触发，对应旧的 `setOnCancelListener`。
+3. **`CommonOperations` 的参数类型从 `Activity` 收窄到 `MainActivity`**（三个函数）。
+   `showDialog` 是宿主能力，而 `CommonOperations` 的 7 个调用点传的都是 `MainActivity`，
+   收窄后由编译器保证「不会在非宿主上下文里静默丢对话框」。
+4. **`ListSingleChoice` 保留「点中即完成 + 勾选框随选项提交」的语义**。旧的
+   `ListCheckBoxDialogBuilder` 就是这个行为（没有确认按钮），改成「选中 + 确定」会多一步。
+5. **`TextInput` 增加 `message` 字段**，只为 js `prompt` 那条路径（旧布局是
+   「message 文本 + 输入框」）。`CommonOperations` 那边不传，保持默认 `null`。
+6. **`DialogWebChromeClient` 拿不到 `MainActivity` 时直接 `cancel()`**，避免 js 端永久挂起
+   （旧实现在任何 context 下都弹自己的对话框）。
+
+已知取舍：
+
+- 同一时刻只有一个宿主对话框（`dialogRequest` 是单值）。旧实现可以叠多个 `AlertDialog`；
+  实际调用路径里没有嵌套弹框的需求，真需要时把状态改成队列即可。
+- `DialogHost` 渲染在 `MainShell` 同级，不在 `Scaffold` 内，所以不受页面 insets 影响；
+  `AlertDialog` 自己处理窗内边距。
+- 收藏备注对话框的输入框现在有 `label`（`favorite_note`），旧 `EditTextDialogBuilder` 是
+  hint；视觉上从「占位提示」变成「浮动标签」，信息量不变。
+
+验证：`:app:compileDebugKotlin`、`:app:spotlessCheck`、`:app:testDebugUnitTest`、
+`:app:assembleDebug` 全绿。真机待回归：收藏（默认槽位 / 选择槽位 / 备注 / 「不再提示」/ 取消回调）、
+下载标签选择（含「记住」回写 `Settings.hasDefaultDownloadLabel`）、无法解析 URL 的复制对话框、
+WebView 登录页的 js `alert` / `confirm` / `prompt`。
+
+**至此界面侧迁移完成**：页面、宿主壳、对话框全部是 Compose；只有 `WebView` 与
+`LockPatternView` 两处外部控件仍通过 `AndroidView` 嵌入（不可能重画）。
+
+### 10.27 真机首跑：两个必崩的地方（补丁片）
+
+装到真机（PLK110 / Android 16）首跑连崩两次，都是编译期发现不了的：
+
+1. **`painterResource(R.mipmap.ic_launcher)` 直接抛异常**
+   `java.lang.IllegalArgumentException: Only VectorDrawables and rasterized asset types
+   are supported ex. PNG, JPG, WEBP`（`PainterResources_androidKt.loadVectorResource`）。
+   `R.mipmap.ic_launcher` 在 API 26+ 解析到 `mipmap-anydpi-v26/ic_launcher.xml` 的
+   `<adaptive-icon>`，Compose 的 `painterResource` 只认 `<vector>` 与位图。
+   修法：`ContextCompat.getDrawable(...)` 拿到 `Drawable`，按 intrinsic size
+   `toBitmap(...)` 后包成 `BitmapPainter`（`SignInScreen`，登录页 logo）。
+   —— 这类问题只在「有 anydpi-v26 覆盖」的资源上出现，`lint` 也不会报。
+
+2. **抽屉在 Activity 协程里开合会崩**
+   `java.lang.IllegalStateException: A MonotonicFrameClock is not available in this
+   CoroutineContext`（`DrawerState$animateTo` → `withFrameNanos`）。
+   `lifecycleScope.launch {}` 默认是 `Dispatchers.Main.immediate`，没有 Compose 的帧时钟；
+   `DrawerState.open()/close()` 是带动画的 `animateTo`，必须有。
+   修法：`lifecycleScope.launch(AndroidUiDispatcher.Main) { … }`（`MainActivity.launchOnCompose`）。
+   —— 页面内的 `rememberCoroutineScope()` 自带帧时钟，所以只有「从 Activity 命令式驱动
+   Compose 动画」才会踩到。
+
+真机回归记录（2026-11-02，`:app:installDebug` + `am start` 后逐屏点验）：冷启动 → 站点选择 →
+游客模式 → 首页列表 → 抽屉（头像 / 「Little Hippo」/ 月亮 / 8 项、主页高亮）→ 设置首页 →
+高级 → 关于，全部正常，`adb logcat -b crash` 无输出。
+
+剩下的真机回归项（没在这一轮点，代码侧无改动风险）：手势锁设置页与解锁页的
+`LockPatternView`（`AndroidView`）、过滤器页的启停/添加/删除、UConfig 与我的标签的 WebView、
+收藏与下载标签的 `DialogRequest` 对话框、WebView 的 js `alert` / `confirm` / `prompt`。
+
+### 10.28 收掉最后四个 M2 对话框 + Nav3 转场（第二十四个落地片）
+
+10.26 把工具层弹框换成了 `DialogRequest`，但仍有 4 处 `androidx.appcompat.app.AlertDialog`
+（View 层，走的是 AppCompat 主题，跟 Compose 侧的 M3 Expressive 完全两套皮），
+真机上「应用链接未验证」一眼就是 M2。这一片全部收进宿主对话框：
+
+| 位置 | 原来 | 现在 |
+| --- | --- | --- |
+| `MainActivity.checkAppLinkVerify` | `AlertDialog.Builder` 三按钮 | `DialogRequest.Message` + `neutralText`（打开设置 / 取消 / 不再显示） |
+| `MainActivity.checkDownloadLocation` | `AlertDialog.Builder` | `DialogRequest.Message` |
+| `DownloadsScene.confirmResetReadingProgress` | `AlertDialog.Builder` | `host.showDialog(DialogRequest.Message)` |
+| `EhApplication.showEventPane` | `AlertDialog.Builder` + 手动 `LinkMovementMethod` | `MainActivity.showDialog`，正文用 `richMessage` 传 `Spanned` |
+
+配套改动：
+
+1. **`DialogRequest.Message` 增加 `neutralText` / `onNeutral` / `richMessage`**。
+   M3 的 `AlertDialog` 只有 confirm / dismiss 两个槽，第三个动作按
+   `EhSettingsDialogs.AccountDialog` 的既有做法并排进 confirm 槽——渲染出来是
+   `[取消] [不再显示] [打开设置]`，比把「不再显示」硬塞进正文更直白。
+2. **富文本走 `AndroidView` + `TextView`**：公告类内容来自 `Html.fromHtml` 的 `Spanned`，
+   Compose 没有等价渲染；只有 `richMessage != null` 时才挂这个 `TextView`，
+   颜色/字号仍取 `MaterialTheme.colorScheme.onSurfaceVariant` / `bodyMedium`。
+3. **`showEventPane` 不再自己 `new AlertDialog`**，改成 `topActivity as? MainActivity`
+   投递请求；拿不到宿主（非 `MainActivity` 的 Activity）时安静跳过，与 `DialogHost` 的
+   单请求语义一致。
+4. **Nav3 转场**：新增 `ui/compose/nav/NavTransitions.kt`（移植 `Matter` 的
+   `NavTransitions`，曲线/时长同 legado-with-MD3：滑入 480ms `FastOutSlowInEasing` +
+   淡入 360ms `LinearOutSlowInEasing`，退场页左移 1/4 屏做视差、返回时缩到 0.8x 淡出，
+   预测性返回共用一个不带时长的 `tween` 让手势进度直接驱动插值），在
+   `EhNavHostActivity.EhSceneShell` 的 `NavDisplay` 上接 `transitionSpec` /
+   `popTransitionSpec` / `predictivePopTransitionSpec`。真机抓中间帧确认是「新页从右滑入、
+   旧页左移 1/4 并有视差」而不是默认的交叉淡入。
+
+顺带修掉一个真机才暴露的真 bug：**打开画廊详情页必定失败**。
+`GalleryDetailViewModel.GetGalleryDetailListener.onSuccess` 里直接调
+`EhDB.putHistoryInfo(result)`，而这个回调跑在 UI 上下文（`EhClient` 用主线程 Handler 回调），
+P6-d 摘掉 `allowMainThreadQueries` 之后它会抛
+`IllegalStateException: Cannot access database on the main thread`，详情页于是渲染成
+「奇怪的错误」（`error_unknown`）。改成 `viewModelScope.launchIO { … }`，
+与同文件 `updateLocalFavorites` 的做法一致。
+
+顺带修掉一个「淡灰色遮罩」：下载页的内容区是一坨中性灰 `#323232`，不是主题的
+`background`。原因是 XML 主题 `Base.AppTheme` 还写着 `android:colorBackground = @color/grey_850`
+（`#323232`，深色）、`@color/colorBackground`（`#fff`，浅色），窗口背景就是它；用了 `Scaffold`
+的页面自己会铺 `colorScheme.background` 所以没事，而下载页是个裸 `Column`（没有 `Scaffold`），
+于是直接透出窗口那层灰。修法在 `EhTheme` 里给整棵组合垫一层
+`Surface(color = colorScheme.background)`——一个地方收口，以后再有没铺底的页面也不会漏出旧灰。
+（XML 侧没动：冷启动的 splash 还是这层灰，只是 Compose 起来之后就被盖住了，留作后续项。）
+
+真机回归记录（2026-11-02 第二轮，PLK110 / Android 16）：
+
+- 冷启动 → 「应用链接未验证」三元对话框（M3E 大圆角，`[取消] [不再显示] [打开设置]`）→
+  点「不再显示」写入 `Settings.appLinkVerifyTip` 并正常关闭 → 站点选择 → 游客模式 → 首页。
+- 抽屉 8 项、设置首页、设置-EH、隐私全部正常；主页 → 设置的转场抓到中间帧，确认滑入 + 视差生效。
+- **图案保护**：隐私页 → 设置图案保护（`LockPatternView` 九点）→ 画一条横跨三点的图案 →
+  设置 → 冷启动出现解锁页 → 画同一图案解锁进入主页 → 回到设置页留空取消图案保护，
+  文案回到「未设置图案保护」。设备状态已复原。
+- **下载标签**：下载页溢出菜单 → 下载标签 → 「+」新建（`TextInput` 对话框，
+  键盘弹出时对话框上移，`确定` 后列表刷新出 `SmokeTest [0]`）→ 长按弹「重命名 / 删除」→
+  删除确认对话框 → 确定后列表移除。测试标签已删除。
+- **重置阅读进度**：下载页溢出菜单 → 确认对话框（`[取消] [确定]`）正常弹出并取消。
+
+没点到的（这一轮网络被挡）：首页列表变 `Sad Panda`，因此**画廊详情页 / 收藏 / 下载项的
+长按菜单 / `DialogRequest.ListSingleChoice`（收藏夹选择）** 以及 UConfig、我的标签、
+WebView 的 js 弹窗都没能回归。其中详情页的 `putHistoryInfo` 修复只做了静态验证
+（调用点搬到 IO，与同文件既有写法一致），下次网络可用时要补点一遍。
+
+四项门禁（`compileDebugKotlin` / `spotlessCheck` / `testDebugUnitTest` / `assembleDebug`）全绿。
+
+### 10.29 背景色收口 + 预测性返回（第二十五个落地片）
+
+**背景**：删掉 XML 里那两个写死的 `android:colorBackground`（深色 `@color/grey_850` `#323232`、
+浅色 `@color/colorBackground` `#fff`），也不再给组合垫 `Surface`。
+
+只删不够：框架 `Theme.Material` 的窗口背景是 `#212121`，实测删完下载页透出来的还是灰
+（`33,33,33`）。所以 `Base.AppTheme` 把 `android:windowBackground` 钉成黑（浅色主题钉成白）——
+这只是启动画面的兜底值；真正的对齐放在运行时：
+
+```kotlin
+// EhNavHostActivity.onCreate
+window.setBackgroundDrawable(ColorDrawable(ehWindowBackground(this)))
+```
+
+`ehWindowBackground()` 走的是 `ehColorScheme()` 那套取色（为此把 `ehColorScheme` 拆出非组合
+版本），所以没给自己铺底的页面（下载页就是个裸 `Column`，没有 `Scaffold`）透出来的就是
+动态取色的 `background`，实测与其它页面一致（`19,13,10`）。
+
+**预测性返回**：`AndroidManifest` 的 `enableOnBackInvokedCallback` 由 `false` 改 `true`。
+开了它之后系统不再回调 `onBackPressed()`，所以：
+
+1. `EhNavHostActivity.onBackPressed()` 换成 `installBackFallback()`——往
+   `OnBackPressedDispatcher` 注册一个最早注册（优先级最低）的 callback，只有页面里的
+   `BackHandler` 和 `NavDisplay` 都不处理时才轮到它（关抽屉 / 弹栈 / `finish()`）。
+2. `NavDisplay` 的 `predictivePopTransitionSpec`（10.28 加的）这才有事件源：nav3 1.2 用
+   `androidx.navigationevent` 自己往系统的 `OnBackInvokedDispatcher` 注册了一个动画回调
+   （实测优先级 0，高于 androidx 桥接的 -1），手势进度直接驱动它的插值。
+3. **抽屉的返回不能再用普通 `BackHandler`**：同优先级下后注册的先派发，而页面内的
+   `BackHandler`（退搜索 / 关评论框）和 `NavDisplay` 的弹栈回调都比外壳注册得晚，外壳抢不过——
+   实测表现是「抽屉关不掉，还把页面弹了」。`MainShell` 因此显式用
+   `NavigationEventDispatcher.PRIORITY_OVERLAY` 注册抽屉这一层（新增
+   `androidx.navigationevent` / `-compose` 依赖），压在页面之上。
+   注意 `isBackEnabled` 的开关要在组合里读一次 `drawerState.isOpen`：只在 `SideEffect`
+   的 lambda 里读不会建立订阅，handler 会一直保持可用，把之后所有返回都吃掉。
+
+真机验证（PLK110 / Android 16）：
+
+- 根页返回 → 「再按一次退出」；抽屉开着返回 → 抽屉关闭（像素回到 `19,13,10`）且不退出；
+  设置页返回 → 弹回主页；下载页的标签抽屉返回 → 关抽屉、页面不动（页面级 `BackHandler` 仍在）。
+- 下载页底色 `19,13,10`，与其它页面一致。
+- `logcat -b crash` 无输出；四项门禁全绿。
+
+**没法用 adb 验证的一项**：真正的预测性返回**手势**（屏幕边缘横滑）adb 发不出来，
+上面所有用例都是 `KEYCODE_BACK`。手势那条要手动划一次确认动画跟手。
+
+### 10.30 `themes.xml` 还需要吗（对照 Matter）
+
+结论：**Compose 不需要**。Matter 的 `res/values` 只有 `strings.xml` 和
+`ic_launcher_colors.xml`（自适应图标的取色），**没有 `themes.xml` / `styles.xml` /
+`attrs.xml` / `colors.xml`**，视觉全在 `MaterialExpressiveTheme` 里：
+
+- `AndroidManifest`：`android:theme="@android:style/Theme.Material.NoActionBar"`、
+  `enableOnBackInvokedCallback="true"`；
+- `MainActivity : ComponentActivity()`（不是 `AppCompatActivity`）+ `enableEdgeToEdge()`；
+- `setContent { MatterTheme { Surface(Modifier.fillMaxSize()) { NavGraph } } }`——
+  背景也是组合里那层 `Surface` 给的（这里按 10.29 的取舍改成了运行时刷窗口背景）；
+- AMOLED（纯黑）在组合里覆盖 surface 一族，跟 `ehColorScheme` 是同一套值。
+
+Eh 现在还被 XML 主题绑住的点（逐一查过引用，其余都是死项）：
+
+| 项 | 谁在用 | 备注 |
+| --- | --- | --- |
+| `windowActionBar` / `windowNoTitle` | `AppCompatActivity` | `EhActivity : AppCompatActivity()` 的硬性要求；换 `ComponentActivity` 就不需要 |
+| `android:windowBackground` | 启动画面 | 10.29 钉成黑/白兜底，`onCreate` 里再按动态取色刷一次 |
+| `R.attr.toolbarColor` | `UrlOpener.kt:86`（Custom Tabs 工具栏色） | 真实消费者 |
+| `android.R.attr.colorBackground` | `WebEditorScene.kt:145`（WebView 底色） | 10.29 已经不写这个 attr，应改读 `ehWindowBackground()` |
+| `android.R.attr.navigationBarColor` | `EhActivity.kt:59` | 框架主题自带 |
+| `R.style.ThemeOverlay` / `ThemeOverlay_Black` | `EhActivity.onApplyThemeResource` | 里面 `dividerColor` / `contentColor*` / `widgetColor*` / `galleryDetail*` 等已无人读 |
+| `?attr/colorControlNormal` | 约 50 个矢量图标的 `android:tint` | Compose 的 `Icon` 用 `LocalContentColor` 覆盖，只有 View 侧才生效，现在基本没有 View |
+| `R.color.lock_pattern_view_*` | `LockPatternView.java:142` | 直接取色，不经过主题 |
+
+已确认无人引用的死项：`styles.xml` 里的 `ProgressView` / `FixedLineHeightEditText` /
+`Widget.FloatingActionButton`；`themes_override.xml`（AppCompat ActionBar 覆盖）；
+`themes.xml` 里的 `colorPrimary*` / `colorAccent` / `dividerColor` / `textColorTheme*` /
+`drawableColor*` / `progressColor` / `guide*` / `tag*` / `galleryDetail*` 等。
+
+### 10.31 XML 主题整个删掉（第二十六个落地片）
+
+上面的清单清点完就直接执行了。改完 `res/values` 下只剩 `attrs.xml`（自定义 View 的
+styleable）、`colors.xml`（给 drawable 用的取色数据）、`strings.xml` 等，**不再有
+`themes.xml` / `themes_override.xml` / `styles.xml`（含 `values-night`）**：
+
+1. `EhActivity : AppCompatActivity` → `FragmentActivity`（仍要 `supportFragmentManager`：
+   `MaterialDatePicker` 用在首页与收藏的「跳转日期」上），`ShortcutsActivity` →
+   `ComponentActivity`。
+   - 去掉 `onApplyThemeResource` / `onNightModeChanged` / `getThemeStyleRes`
+     （`ThemeOverlay.Black` 没了，纯黑改由 `ehColorScheme` 覆盖）；
+   - 去掉 `LayoutInflaterFactory(delegate)` + `WindowInsetsHelper`（`res/layout` 已清空，
+     本来就没活干）；
+   - 系统栏改成自己按当前配置刷：图标明暗用 `WindowCompat.getInsetsController`，
+     导航栏底色用 `ehWindowBackground()` + 0xE0 alpha（原来是读主题 attr）。
+2. `AndroidManifest` 的 `android:theme` → `@style/Theme.Material3.DayNight.NoActionBar`。
+   这里没照抄 Matter 的 `@android:style/Theme.Material.NoActionBar`，两个原因：
+   `MaterialDatePicker` 需要 MDC 主题里的那批 attr；DayNight 会自己跟着昼夜翻，省掉
+   「框架主题写死成深色、浅色模式下状态栏图标看不见」的问题。库里现成的 style，不用我们写 XML。
+3. 取色入口收进 `EhTheme.kt`：`ehWindowBackground()`（窗口 / 没铺底的页面）、
+   `ehToolbarColor()`（Custom Tabs 工具栏，原来是 `?attr/toolbarColor`）、
+   `ehColorScheme(context, dark, amoled)` 拆出非组合版本。
+4. 10 个 drawable 的 `android:tint` 原来写的是 `?drawableColorThemePrimary` /
+   `?drawableColorSecondary`（随主题一起删掉的 attr），aapt 直接报错；改成
+   `?attr/colorPrimary` / `?attr/colorControlNormal`（MDC 主题里都有）。
+   这些 tint 在 Compose 里本来也不生效（`Icon` 用的是 `LocalContentColor`），保留只是为了
+   万一还有 View 侧在 inflate。
+5. rikka 那一批依赖（`rikkax-core` / `-insets` / `-layoutinflater` / `-material` /
+   `-simplemenu-preference`）随 View 层一起没人用了，`bundles.rikkax` 与
+   `configurations.all { exclude("dev.rikkax.appcompat") }` 一并删除。
+
+没动的东西：`colors.xml` 里的取色数据（drawable 还在用，未被引用的那些交给资源裁剪）、
+`attrs.xml` 里自定义 View 的 styleable。
+
+**换 Activity 基类之后要真机验一遍的点**（本轮没验）：
+
+- 夜间模式切换（`AppCompatDelegate.setDefaultNightMode`）：API 31+ 走
+  `UiModeManager.setApplicationNightMode()`，是进程级的，`ComponentActivity` /
+  `FragmentActivity` 都吃得到；但应用内语言 `setApplicationLocales` 在 31/32 上走的是
+  AppCompat 的每 Activity 重建，换基类后可能失效（33+ 走 LocaleManager，不受影响）。
+- 启动画面：库主题的 `windowBackground` 是它自己的深色，`onCreate` 里刷成动态取色之前
+  会有很短一帧不一致。
+- `MaterialDatePicker`（首页 / 收藏的「跳转到指定日期」）在 M3 DayNight 主题下的外观。
+- 是否要再加 `enableEdgeToEdge()`（Matter 有，我们是手动刷系统栏，行为没变，先不动）。
+
+四项门禁（`compileDebugKotlin` / `spotlessCheck` / `testDebugUnitTest` / `assembleDebug`）全绿。

@@ -133,6 +133,7 @@
 
     <!-- Gallery Search -->
     <string name="search_normal">普通搜索</string>
+    <string name="search_advanced">高级搜索</string>
     <string name="search_normal_search">一般搜索</string>
     <string name="search_subscription_search">订阅搜索</string>
     <string name="search_specify_uploader">指定上传者</string>
@@ -189,6 +190,7 @@
     <string name="torrent_count">种子 (%d)</string>
     <string name="archive">压缩包</string>
     <string name="similar_gallery">相似画廊</string>
+    <string name="tags">标签</string>
     <string name="no_tags">暂无标签</string>
     <string name="no_comments">暂无评论</string>
     <string name="more_comment">查看更多评论</string>
@@ -436,6 +438,12 @@
     <string name="settings_read_reading_direction_left_to_right">从左至右</string>
     <string name="settings_read_reading_direction_right_to_Left">从右至左</string>
     <string name="settings_read_reading_direction_top_to_bottom">从上至下</string>
+    <string name="settings_read_reading_direction_webtoon">上下连续滚动</string>
+    <string name="reader_back">返回</string>
+    <string name="reader_menu_pages">目录</string>
+    <string name="reader_menu_auto_page">自动翻页</string>
+    <string name="reader_menu_scale">切换缩放</string>
+    <string name="reader_menu_theme">阅读主题</string>
     <string name="settings_read_page_scaling">页面缩放</string>
     <string name="settings_read_page_scaling_actual_size">原始尺寸</string>
     <string name="settings_read_page_scaling_fit_to_width">匹配宽度</string>
@@ -593,7 +601,6 @@
     <string name="error_something_wrong_happened">被玩坏了</string>
     <string name="no_browser_installed">请安装一个浏览器。</string>
     <string name="cloudflare_bypass_failed">未能绕过 Cloudflare 验证</string>
-    <string name="open_in_webview">在 WebView 中打开链接以通过验证？</string>
 
     <!-- Readable Time -->
     <string name="from_the_future">来自未来</string>
@@ -622,4 +629,63 @@
         <item quantity="other">年</item>
     </plurals>
     <string name="night_mode">夜间模式</string>
+
+    <!-- 阅读器 -->
+    <string name="action_copy">复制</string>
+    <string name="action_menu">菜单</string>
+    <string name="action_retry">重试</string>
+    <string name="action_save">保存</string>
+    <string name="action_save_to">另存为…</string>
+    <string name="action_settings">设置</string>
+    <string name="action_share">分享</string>
+    <string name="blocked_image">已屏蔽图片</string>
+    <string name="custom_filter">颜色滤镜</string>
+    <string name="decode_image_error">图片解码失败</string>
+    <string name="label_default">默认</string>
+    <string name="left_to_right_viewer">从左到右</string>
+    <string name="right_to_left_viewer">从右到左</string>
+    <string name="vertical_viewer">纵向翻页</string>
+    <string name="webtoon_viewer">条漫</string>
+    <string name="vertical_plus_viewer">连续纵向</string>
+    <string name="nav_zone_left">左</string>
+    <string name="nav_zone_next">下一页</string>
+    <string name="nav_zone_prev">上一页</string>
+    <string name="nav_zone_right">右</string>
+    <string name="pager_viewer">翻页</string>
+    <string name="permission_denied">权限被拒绝</string>
+    <string name="pref_category_general">通用</string>
+    <string name="pref_category_reading_mode">阅读模式</string>
+    <string name="pref_color_filter_mode">混合模式</string>
+    <string name="pref_crop_borders">裁切边框</string>
+    <string name="pref_custom_brightness">自定义亮度</string>
+    <string name="pref_custom_color_filter">自定义颜色滤镜</string>
+    <string name="pref_cutout_short">避开挖孔区域</string>
+    <string name="pref_double_tap_to_zoom">双击缩放</string>
+    <string name="pref_fullscreen">全屏</string>
+    <string name="pref_grayscale">灰度</string>
+    <string name="pref_image_scale_type">图片缩放方式</string>
+    <string name="pref_inverted_colors">反色</string>
+    <string name="pref_keep_screen_on">屏幕常亮</string>
+    <string name="pref_landscape_zoom">横屏自动放大</string>
+    <string name="pref_navigate_pan">拖动浏览</string>
+    <string name="pref_page_transitions">翻页动画</string>
+    <string name="pref_read_with_long_tap">长按操作</string>
+    <string name="pref_read_with_tapping_inverted">反转点击区域</string>
+    <string name="pref_reader_theme">阅读器主题</string>
+    <string name="pref_rotation_type">屏幕方向</string>
+    <string name="pref_show_page_number">显示页码</string>
+    <string name="pref_show_reader_seekbar">显示进度条</string>
+    <string name="pref_viewer_nav">点击区域</string>
+    <string name="pref_webtoon_side_padding">两侧留白</string>
+    <string name="pref_zoom_start">初始缩放位置</string>
+    <string name="rotation_force_landscape">强制横屏</string>
+    <string name="rotation_force_portrait">强制竖屏</string>
+    <string name="rotation_free">自由旋转</string>
+    <string name="rotation_landscape">横屏</string>
+    <string name="rotation_portrait">竖屏</string>
+    <string name="rotation_reverse_portrait">反向竖屏</string>
+    <string name="rotation_type">屏幕方向</string>
+    <string name="show_blocked_image">显示被屏蔽图片</string>
+    <string name="view_original">查看原图</string>
+    <string name="viewer">阅读模式</string>
 </resources>

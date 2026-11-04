@@ -743,3 +743,422 @@ R6 加的 `pointerInputWake`（「随便点一下把收起的栏叫回来」）�
 - RTL 下左右对调；纵向阅读时上下翻页、中间左右分菜单与进度；
 - 双击仍能放大，且**只放大不翻页**；
 - 长按开页面菜单后松手不翻页；按住拖动不翻页；缩放到 3 倍后单击仍然只算一次。
+
+## 18. R9：把「原始感」拆成六个能复现的 bug
+
+R8 之后功能面已经齐了，但真机上仍然「很原始、很多 bug」。这一片不再加功能，
+只把 `D:\Project\jmcomic`（JMComicX `ComicReaderScreen.kt`）与
+`D:\Project\legado-with-MD3`（`ui/book/manga/`）的漫画阅读器里**已经被真实用户跑过**
+的做法对着我们的代码逐条比，找出六处差异，逐条修掉。
+
+六条的共性是：**都能写成一句「用户会怎么骂」，而不是「代码不够优雅」**。
+
+### 18.1 旋转一次，阅读器就废了（真崩溃）
+
+`AndroidManifest.xml` 里宿主只声明了 `android:configChanges="screenSize"`——**方向变化
+会重建 Activity**，而阅读器是唯一允许锁横屏的页面（`screen_rotation`）。
+
+重建时的顺序是这样的：
+
+1. 组合被丢弃，`ReaderRoute` 的 `DisposableEffect(route)` 执行 `pageSource.close()`
+   ——`SpiderQueen` 被 release、`cache/reader/<gid>` 被删；
+2. 但 NavEntry 的 `ViewModelStore` 是**留着**的，`viewModel { }` 会把重建前那个
+   `ReaderViewModel` 原样还回来；
+3. 这个 ViewModel 手里握着步骤 1 已经关掉的页源，之后每取一页都失败。
+
+修法：给 `viewModel` 打上「页源实例」的键（`"reader-${identityHashCode(source)}"`）。
+页源一换就是新一代，旧实例留给 store 自然回收。**这里的键不能是 `route`**：route 在
+旋转前后一模一样，正好是最不该变的东西。
+
+`OnlinePageSource.close()` 同时补了一步：把还在 `awaitDownloaded` 里等的协程全部
+`completeExceptionally` 叫醒。`queen` 都 release 了，再也不会有人调 `finish()`，
+不叫醒的话它们要各自空等到 120s 超时——旋转正好会留下这种僵尸协程。
+
+### 18.2 一次抛滑，把沿途十几页都写进了阅读进度
+
+```kotlin
+snapshotFlow { pagerState.currentPage }   // ← 旧代码
+```
+
+`currentPage` 在手指还没抬起时就跟着变，惯性滑行的每一页都会触发一次
+`PageSettled` → 写 Room + 写 `.ehviewer`。后果：**「读到 30 页，退出去再进来落在 27 页」**
+（最后一次写入的时机与惯性有关，不一定是终点页）。
+
+照抄 legado 的三段式：
+
+| 概念 | 状态字段 | 触发源 | 用途 |
+| --- | --- | --- | --- |
+| 滚到哪了（跟着手指） | `footerPage` | `snapshotFlow { pagerState.currentPage }` | 顶/底栏数字、预取锚点 |
+| 读到哪了（落定） | `currentPage` | `snapshotFlow { pagerState.settledPage }` | 写进度、`navigationId` |
+| 显示哪一页 | `displayPage`（派生） | `footerPage ?: currentPage` | UI 只读这一个 |
+
+顺带把 `rememberSaveable` 存的那一份改成落定页——进程重建时不该恢复到「滑到一半的那页」。
+
+### 18.3 翻页是瞬移的
+
+`pagerState.scrollToPage(request.page)` 对**所有**跳页生效，包括「点屏幕右边 1/3」。
+于是点一下翻页=画面直接换一张，没有滑动过程，手感像在翻 PPT。
+
+`ReaderScrollRequest` 加 `animated`，并配一个纯函数卡住边界：
+
+```kotlin
+internal fun shouldAnimateScroll(request: ReaderScrollRequest, from: Int) =
+    request.animated && abs(request.page - from) <= 1
+```
+
+- 点屏幕 / 音量键（`PageStep`）→ `animated = true` → `animateScrollToPage`；
+- 底栏滑块 / 跳页框 → `animated = false` → `scrollToPage`；300 页的画廊要是也 animate，
+  跳一页能扫半分钟（legado 的滑块拖动就固定 `animated = false`，注释写得很清楚）。
+
+### 18.4 每页都淡入 + 刷新后显示旧图
+
+全局 `ImageLoader` 是给封面配的：`crossfade(300)` + 磁盘缓存 `thumbCache`。阅读器直接
+复用了它，于是：
+
+- 每翻一页都从透明淡入 300ms，观感就是「卡一下」（JMComicX 对阅读器的请求显式
+  `crossfade(false)`）；
+- 长按「刷新」把**同一路径**的文件重写一遍，Coil 的内存键没变，于是把旧位图原样还回来，
+  表现为「刷新点了没反应」；
+- 源本来就是本地文件，还往 `thumbCache` 里塞一份纯属白占空间。
+
+请求改成：
+
+```kotlin
+ImageRequest.Builder(context)
+    .data(file)
+    .memoryCacheKey(cacheKey)            // 键 = 路径 + length + lastModified
+    .placeholderMemoryCacheKey(cacheKey) // 同键：切缩放模式时不先闪一张小图
+    .diskCachePolicy(CachePolicy.DISABLED)
+    .crossfade(false)
+```
+
+### 18.5 缓存命中也要先闪 150ms 转圈
+
+`LoadingPage` 无条件画 `CircularProgressIndicator`。命中缓存 / 已预取的页解码只要几十毫秒，
+所以翻页时总会看见一次「转圈一闪」。legado 用 150ms、JMComicX 用 180ms 的门槛把这个
+闪烁藏掉（「150ms 内到位就当没这回事」）。
+
+实现上有个坑：`Queued` 与 `Loading` 如果各自是一个 `LoadingPage(...)` 调用点，组合位置不同，
+状态一迁移 `remember` 就被重置——第一个进度事件到达时转圈会**重新**再等 150ms，网速慢时
+看起来像卡死。所以中间加了一层 `PageSlot`，让两个状态走**同一个**调用点。
+
+错误占位同时补了底色（`surfaceContainerHigh` 90%）：它可能压在任何颜色的画面上。
+
+### 18.6 按住音量键会以几十页/秒翻过去
+
+`onKeyEvent` 只看 `ACTION_DOWN`，没看 `repeatCount`，而且是「吃按下、放抬起」——
+按住不放会连翻，抬起又漏给系统弹音量条。补成：`repeatCount == 0` 才翻，`ACTION_UP`
+也返回 true。
+
+### 18.7 顺手补的四条
+
+| 项 | 之前 | 现在 |
+| --- | --- | --- |
+| 自动翻页 | 设置面板开着也照翻（人被挡在后面） | `overlayOpen` 时暂停，与旧 `GalleryActivity` 一致 |
+| 底栏滑块 | 连续取值，松手会落在半页 | `steps` 一页一格 |
+| 分页器 `key` | 没传，`ReaderItemUi.key` 是死字段 | 用上了：Error ↔ Page 切换时重建条目，缩放状态不串 |
+| `cache/reader/*` | 进程被杀就永久残留（400 页画廊能留几百 MB） | 应用启动时整体清一次；`readerCacheDir()` 收口路径 |
+| 预取 | 已滑出窗口的等待协程不撤 | 撤掉并退回 `Queued`（停在 `Loading` 会永远转圈） |
+| 顶栏按钮 | `Text("\u2190")` / `Text("\u2261")` 两个字符 | 两个 `res/drawable/ic_reader_*.xml` 矢量 + `Icon` |
+
+> 顶栏为什么不引 `material-icons-core`：Compose 1.13 这条线上它已经停在 1.x 不再跟进，
+> 为了两个图标去引一个版本对不齐的依赖不划算。
+>
+> 更新（全局顶栏改造）：除阅读器浮栏外，其余顶栏已经统一成 `LargeTopAppBar` + `Icons.*`，
+> 工程因此引入了 `material-icons-extended`（BOM 钉在 1.7.8，只提供矢量与常量，跟 1.13 主线混用安全）。
+> 阅读器仍然用它自己的 `ic_reader_*.xml`：那一栏是叠在翻页区上的浮层，不在这次改造范围内。
+
+还有一个不显眼但影响首帧的：两个分页器都给了 `beyondViewportPageCount = 1`。翻过去时
+图片头已经解出来了，不会先出一帧空白；只给 1 是因为整图 fallback（`SCALE_ORIGIN`）下
+每多组合一页就是一张全尺寸位图。
+
+### 18.8 进度落盘的节流
+
+`PageSettled` 每次都写 Room + `.ehviewer`。连翻十页就是十条写事务，还会顺带刷新历史列表。
+
+`ProgressThrottle`（纯类，可直接单测）：第一次立即写，之后 2 秒最多一次，被压住的页记成
+`pending`；退出时 `flushProgress()` 补上，`onCleared` 再兜一次底。
+
+> **丢的必须是中间页，绝不能是最后一页。** 这条纪律在 `flushProgress` 里写成注释，
+> 因为它正是 18.2 那个 bug 的反面。
+
+`flushProgress()` 走 `launchIO`（应用级作用域）而不是 `viewModelScope`——它常常在
+ViewModel 已经在销毁的过程中被调用，那时 `viewModelScope` 已经取消了。
+
+### 18.9 与计划 / 参考实现的偏离
+
+1. **没有抄 legado 的九宫格自定义点击区**（`clickActions: 9 个 int`）。EhViewer 的
+   点击区是 3 分区 + 中段二分，引导文案已经写死了；做成可配置要动设置页与序列化，
+   收益不足以放进这一片。
+2. **没有抄 `MangaWebtoonTiles` 那套自绘瓦片高清层**。telephoto 的
+   `ZoomableImageSource.coil` 内部就转成了 `SubSamplingImageSource`
+   （`Resolver$toSubSamplingImageSource`，`zoomable-image-coil3-0.19.0`），区域解码这块
+   我们本来就有；再叠一层自绘瓦片是重复实现。
+3. **没有抄 `maxBitmapSize(4096)`**。那是 Coil 2 的 API，Coil3 的
+   `ImageRequest.Builder` 上已经没有 `maxBitmapSize`（`coil-core` 3.6.2 实测），
+   要拦只能自己写 interceptor 改 decode options；而 telephoto 走的是区域解码，
+   真正需要这条兜底的只有 `SCALE_ORIGIN` 整图路径，留到真机复现再说。
+4. **没有做「缩放到 >1 时单击不翻页」**。`ZoomableState.zoomFraction` 能拿到倍率，但
+   缩放状态是**每页一份**的，要提到 pager 外面就得给每个条目回报、还得判断哪个才是
+   当前页；这套同步本身比功能更容易出 bug，暂不做。
+5. **自动翻页到末页依旧静默停止**（`ScrollTo(count)` 被钳回原地），与 R3 一致。
+
+### 18.10 验证
+
+四道门禁全绿：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:testDebugUnitTest`
+（63 → 69 例：`ReaderContractTest` +6 条，覆盖动画边界、footer/settled 分离、
+进度事件去重、节流与退出 flush）、`:app:assembleDebug`。
+
+真机待跑（R9 验收）：
+
+- 阅读器里锁横屏 / 转屏一次，仍然能继续翻页（18.1）；
+- 从第 1 页一次抛滑到第 30 页，退出再进，**落在第 30 页**（18.2）；
+- 点屏幕右边 1/3，页面是滑过去的；拖底栏滑块到第 100 页，是直接落位（18.3）；
+- 缓存过的页翻过去不再闪转圈；长按「刷新」后画面真的换了（18.4 / 18.5）；
+- 按住音量键不放只翻一页，且不弹系统音量条（18.6）；
+- 设置面板开着时自动翻页暂停（18.7）。
+
+### 18.11 本片刻意留下的功能缺口
+
+条漫连续滚动（`VerticalPager` 装不下 800×4000 的长条页）留到了下一片，已在第 19 节落地。
+
+## 19. R10：条漫连续滚动（第四个阅读方向）
+
+R2 把 `LAYOUT_TOP_TO_BOTTOM` 落成了 `VerticalPager` **逐页**（11.3 第 3 条）。这在长条漫画上
+是硬伤：`page_scaling = FIT` 下 800×4000 的页被压成一条细条，必须捏合放大才能读；而
+`VerticalPager` 里套 `verticalScroll` 又一定会抢同一根轴上的手势——**分页器装不下条漫**。
+JMComicX 的整个阅读器就是一条 `LazyColumn`，legado 也另留了 `WebtoonMangaList`。
+
+R10 因此不改 2 号取值的行为，而是新增第四个方向。
+
+### 19.1 设置层：多一个取值，不是多一个开关
+
+| 层 | 改动 |
+| --- | --- |
+| `ReaderLayoutMode.kt` | 新增 `LAYOUT_WEBTOON = 3`（旧 GL 栈只有 0/1/2） |
+| `Settings.readingDirection` | `coerceIn(0, 2)` → `coerceIn(0, 3)`，旧值含义不变 |
+| `ReaderSettings` | 新增 `webtoon: Boolean`，优先级高于 `vertical` |
+| `ReaderSettingsStore` | 双向映射收口成纯函数 `readingDirectionOf()`，可单测 |
+| 设置面板 | 阅读方向从三选一变四选一，**一次把三个开关都写清楚** |
+
+面板那一条值得单说：`onSelect` 必须同时写 `webtoon / vertical / reverseLayout` 三个字段。
+只写其中一个的话会出现「webtoon=true 且 vertical=true」这种半新半旧的组合，而
+`readingDirectionOf()` 里条漫优先的分支就是为这种情况留的兜底。
+
+### 19.2 结构：把「谁拥有滚动状态」交还给容器
+
+上一片的 `ReaderScreen` 自己在顶层 `rememberPagerState`，再往下分发分页器。条漫不需要
+pager，于是在顶层留一个 pager 只会变成两套状态打架。现在拆成：
+
+```
+ReaderScreen            底色 / 点击区去向 / 顶底栏 / 面板 / 引导 / 自动翻页 / 音量键
+├── PagedReader         HorizontalPager | VerticalPager + telephoto + 分页器手势
+└── WebtoonReader       LazyColumn + 双指缩放 + 行命中
+```
+
+两边各自拥有滚动状态与副作用（footer / settled / scrollRequest 的执行），**只向上报两个事**：
+`onZone(ReaderTapZone)` 与 `onSettled(page)`。页码因此由 `savedPage` 接力——换模式时
+停在原页，进程重建后也能回到原页。
+
+### 19.3 页码口径：可见面积最大
+
+连续滚动下 `firstVisibleItemIndex` 不能用：一页常常比视口高好几倍，一屏里同时压着三页，
+它只会报「还露着一角」的那页，页码与进度会来回跳。改成纯函数（`ReaderLayoutMode.kt`）：
+
+```kotlin
+internal fun webtoonCurrentRow(rows: List<ReaderVisibleRow>, viewportStart: Int, viewportEnd: Int): Int?
+```
+
+取交集高度最大的那一行；面积打平时保留**更靠前**的一页（否则两张短页会交替抢页码）；
+完全没交集返回 null（列表还没测量，此时不该上报）。
+
+「落定」沿用 R9 的语义，只是触发源换成 `listState.isScrollInProgress` 变 false 后再等
+120ms——惯性刚停时 `layoutInfo` 还会再补一帧，立刻取会记成停稳前的那一页（表现为进度
+永远慢半页）。
+
+### 19.4 行高：先验估算 + 文件头精确值
+
+首测高度是最容易翻车的地方（JMComicX 用一整段注释记过）：高度是 0 会让 `scrollToItem`
+一路往后组合（整话请求雪崩），偏大则每出一张图就缩一次。
+
+做法：
+
+1. 每行 `Modifier.aspectRatio(1f / h/w)`，高度只由宽度与比例决定；
+2. 比例未知时用**本章已测页的中位数**（`derivedStateOf`，条漫一话通常同一画幅），
+   一页都没测过时退回 1.4（≈A4）；
+3. 行一组合就用 `BitmapFactory.inJustDecodeBounds` 读文件头（几毫秒，只解头部）换成精确值，
+   不等 Coil 解码；
+4. 比例钳在 `0.2 .. 30`：极端长条（1:30 以上）会把 `Constraints` 压垮。
+
+**没做**的是 JMComicX 的「比例按章节落盘」（`readerHeightPermille`）。差别只在冷启动首次
+跳页的估算精度，而 `LazyListState.scrollToItem` 是按下标定位、不累加高度，所以跳页本身
+不受影响；留到有真机数据再说。
+
+### 19.4.1 「组合出来就要」：`EnsurePage`
+
+`LazyColumn` 不预组合视口外的项，所以一屏边缘常常压着**预取窗口之外**的行。只靠窗口的话
+这些行会长期空白（不是一闪，是一直到滑出屏幕）。
+
+但这里不能顺手用 `Prefetch`：`Prefetch` 的语义是「这是新的窗口」，VM 会连带
+`cancelOutOfWindow()` 把窗口外的任务取消——刚被取消的行下一帧又被自己组合出来，于是
+取消/重来无限抖动。所以加了单独的意图：
+
+```kotlin
+data class EnsurePage(val index: Int) : ReaderIntent   // 只推这一页，不动窗口
+```
+
+归约只把 `Queued` 推成 `Loading`（`Loading` / `Ready` / `Error` 一律不动，`Error` 要等
+显式重试），VM 只 `load(index)`。
+
+还没完：这些行本来就在窗口外，下一次 `Prefetch` 又会把它们撤掉，撤掉之后行还在屏幕里、
+`LaunchedEffect` 一看回到 `Queued` 又要一遍——**取消/重来会一直抖**。所以 VM 里给它们
+打一个 `pinned` 标记，`cancelOutOfWindow()` 跳过：任务跑完（成功或失败）自动解除。
+
+### 19.5 缩放：改宽度，不改 layer
+
+- **不能 per-item**：`ZoomableImage` 在纵向 `LazyColumn` 里会和列表抢手势；
+- **也不能只 `graphicsLayer` 缩放**：那样行高不变、纵向滚动速度变成 1/zoom，还得补一套
+  锚点数学（legado 的 `preserveWebtoonZoomPosition` 就是干这个的）。
+
+采用的是 legado 的第三条路：**缩放改列表宽度**。
+
+```kotlin
+BoxWithConstraints {
+    LazyColumn(
+        Modifier.requiredWidth(maxWidth * zoom)
+            .graphicsLayer { translationX = panFraction * viewportWidthPx / 2f },
+    )
+}
+```
+
+宽度变了 → 行高随 `aspectRatio` 变 → 纵向滚动仍是 1:1；横向用 `translationX` 平移，
+`panFraction` 夹在 `±(zoom-1)`，正好等于「超出视口的那半边」（拖得到两端，也拖不出空白）。
+单指事件完全不消费，双指才 `consume()`。
+
+### 19.6 手势：顺手修掉「一拖就误开页面菜单」
+
+点击区复用 R8 的那套「不消费事件」的观察者，但补了长按：条漫里没有 telephoto 帮忙按行
+命中，只能自己按 `y` 找 `visibleItemsInfo`。
+
+写这里才发现 R8 的版本有个真 bug：`waitForUpOrCancellation()` 对「超时（长按）」和
+「被滚动取消」**都返回 null**，光看它分不出这两件事。现在改成三态：
+
+```kotlin
+private suspend fun AwaitPointerEventScope.awaitPressOutcome(...): PressOutcome
+// Up(position) / LongPress / Cancelled
+```
+
+只有「超时且移动没超过 touchSlop」才算长按；移动出 slop 一律判取消。`withTimeoutOrNull`
+返回 null 才代表超时，这是唯一可靠的判据。
+
+### 19.7 与参考实现的偏离
+
+1. **没做 `MangaWebtoonTiles` 那种自绘瓦片**：telephoto 对分页模式已经够用，条漫这边用
+   普通 `AsyncImage`（宽度铺满即原分辨率），没必要再叠一层区域解码；
+2. **没做双击缩放**：双击目前是「什么都不做」（点击区会等一个 doubleTapTimeout 后吞掉）。
+   要做得先定义「双击落在哪个锚点」，与上面的宽度缩放一起算才有意义；
+3. **没做跨章连续拼接**（读到末尾直接接下一话）。EhViewer 是画廊语义，没有「下一话」；
+4. **比例不落盘**，见 19.4；
+5. **`page_scaling` 在条漫下不生效**（一律按宽度铺满）——条漫没有「适应高度」这种东西，
+   设置面板里那一行仍然显示，读了不改行为。
+
+### 19.8 验证
+
+四道门禁全绿：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:testDebugUnitTest`
+（69 → **75 例**：`ReaderLayoutModeTest` +5 条，覆盖方向映射的优先级、可见面积选取、
+面积打平、未布局、完全滚出；`ReaderContractTest` +1 条 `EnsurePage`）、`:app:assembleDebug`。
+
+真机待跑（R10 验收）：
+
+- 设置里选「连续滚动」，长条页铺满宽度、首尾相接，竖向滑动没有卡顿与跳行；
+- 一屏压着两页时，顶栏数字停在「占得多的那一页」，不会来回跳；
+- 捏合放大到 2 倍：行变宽变高、纵向滑动速度不变，左右能拖到两端且不露空白；
+- 放大状态下松手，单指仍然正常滚动（不会卡住）；
+- 拖底栏滑块跳到第 100 页，落位即第 100 页（不扫中间页）；
+- 长按弹页面菜单，**按住拖动不会误弹**；
+- 切回「从右至左」再切回连续滚动，两次都停在原页。
+
+## 20. R11：滑不动 + 图不居中（两个一进阅读器就能看见的 bug）
+
+R9/R10 之后功能都在，但真机上「怎么滑都不翻页，图还贴在顶上」。两个 bug 互不相干，
+一个是 Compose 命中测试的语义，一个是照抄了不该照抄的参数。
+
+### 20.1 滑不动：手势检测器被放在了滚动容器的**兄弟节点**上
+
+R8 把点击区写成「盖在分页器上的全屏 Box + pointerInput」，并在注释里断言
+「不消费事件，所以翻页手势照旧穿过去」。**这条断言是错的。**
+
+Compose 的命中测试在兄弟层是**独占**的（`InnerNodeCoordinator.hitTestChild`：某个兄弟
+`hasHit()` 之后，只有语义源才会 `shareWithSiblings`；`PointerInputSource.shareWithSiblings`
+走的是 `shouldSharePointerInputWithSiblings()`，默认 false）。所以那个覆盖层一上图：
+
+- `down` 全被覆盖层收走，分页器 / `LazyColumn` / telephoto **根本没进场**；
+- 单击由覆盖层自己处理 → 「点能翻页」；
+- 拖动没人处理 → 「滑不翻页」；双击缩放也一并失效。
+
+看起来像手势半死，实际是下层完全没收到事件。这也解释了为什么它「一直都有」：
+R8 起就是这个结构，而 R8 的真机验收清单一直没跑。
+
+修法：**把检测器挂成滚动容器的祖先 Modifier**，不再做覆盖层。
+
+```kotlin
+// 之前：兄弟节点，独占命中
+Box { HorizontalPager(); ReaderTapZones(Modifier.matchParentSize()) }
+// 现在：祖先 Modifier，子节点先拿到事件，这里只观察
+Box(Modifier.fillMaxSize().pointerInputTaps(...)) { HorizontalPager() }
+```
+
+祖先在命中路径上而且不拦截后代（`hit()` 加完自己继续 `hitTestChild`），所以 pager /
+telephoto / LazyColumn 与点击区可以同时工作。条漫那边的双指缩放框是同一个错误，一并改掉。
+
+顺手补的一条纪律：`onZone` / `onLongPress` 这两个回调**不能**进 `pointerInput` 的 key
+（它们每次重组都是新实例，key 一变检测器就重建，正在等的那个 `doubleTapTimeout` 会被
+直接取消，表现成「双击的第一下被吞」）。改用 `rememberUpdatedState` 取。
+
+> 另一条可行路线是给覆盖层显式打开「与兄弟共享命中」
+> （`PointerInputModifierNode.sharePointerInputWithSiblings()`）。没选它：祖先方案不需要
+> 维护一个「哪些覆盖层开了共享」的清单，也不会在以后再加浮层时复发。
+
+### 20.2 图不居中：把 `start_position` 无脑喂给了 telephoto
+
+`ZoomableImage(alignment = alignmentOf(startPosition))`。默认设置是
+`SCALE_FIT` + `START_POSITION_TOP_RIGHT`，于是：
+
+- `ContentScale.Fit` 只让一个轴向铺满，另一个轴有富余；
+- 富余的那一轴被顶到 `TopEnd` → 竖屏看漫画就是「图贴在上/右，下/左留一条黑」。
+
+旧 `ImageView` 里 `start_position` 只对「按原图尺寸绘制」（`SCALE_ORIGIN` / `SCALE_FIXED`）
+有效，FIT 系列一律居中。现在收口成纯函数：
+
+```kotlin
+internal fun alignmentFor(scaleMode: Int, startPosition: Int): Alignment =
+    if (scaleMode == SCALE_ORIGIN || scaleMode == SCALE_FIXED) alignmentOf(startPosition)
+    else Alignment.Center
+```
+
+### 20.3 还剩一个已知限制：原图 / 适应宽度下的翻页
+
+`SCALE_ORIGIN`、`SCALE_FIXED`、`SCALE_FIT_WIDTH` 这三种模式下图片本来就比视口大，
+telephoto 的 `canConsumePanChange()`（内容边界内还有余量就返回 true）会把单指拖动全部
+吃掉用来平移——分页器收不到，拖动翻不了页。这不是 bug 而是取舍：要么能平移，要么能翻页。
+
+旧 `GalleryView` 的答案是「拖到边界再拖就翻页」（edge handoff）。Compose 里要复刻，得把
+telephoto 的平移量接到 `nestedScroll` 的 `postScroll` 上，属于另一片的量级，先记在这里。
+
+当前这三种模式下翻页走：点屏幕左右 1/3、音量键、底栏滑块。
+默认的 `SCALE_FIT` 不受影响（图片装得进视口，telephoto 不消费）。
+
+### 20.4 验证
+
+四道门禁全绿：`:app:spotlessCheck`、`:app:compileDebugKotlin`、`:app:testDebugUnitTest`
+（75 → **77 例**：`alignmentFor` 两组，分别钉住「FIT 必居中」与「只有原图尺寸才认锚点」）、
+`:app:assembleDebug`。
+
+真机待跑（R11 验收）：
+
+- 左右拖动翻页、拖到一半松手会回弹（分页器正常）；
+- 双击能放大、放大后拖动是平移而不是翻页；
+- 单击左 / 右 1/3 仍然翻页（点击区没被祖先化搞坏）；
+- 竖向逐页模式上下拖动翻页；
+- 条漫模式竖向能滚、双指能缩放、长按出页面菜单；
+- 默认设置下图片居中，不再贴顶/贴右。

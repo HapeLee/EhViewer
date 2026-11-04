@@ -14,27 +14,12 @@
   ~ limitations under the License.
   -->
 
+<!--
+  ~ 只剩启动帧的窗口底色。深色下直接给纯黑：AMOLED 是深色的子集，XML 无法感知那个开关，
+  ~ 而普通深色用户看到一帧纯黑也无感，总比闪一下灰白强。
+  -->
 <resources>
 
-    <color name="primary_drawable">#ffffffff</color>
-    <color name="secondary_drawable">#4dffffff</color>
+    <color name="window_background">#FF000000</color>
 
-    <color name="content">@color/grey_825</color>
-    <color name="content_activated">@color/grey_600</color>
-    <color name="widget">@color/grey_700</color>
-    <color name="progress">@color/grey_600</color>
-    <color name="tag_group_background">@color/grey_775</color>
-    <color name="tag_background">@color/grey_775</color>
-    <color name="gallery_detail_button_background">@color/grey_775</color>
-
-    <!-- divider -->
-    <color name="divider">#20ffffff</color>
-
-    <!-- shadow -->
-
-    <!-- Lock pattern view -->
-    <color name="lock_pattern_view_regular_color">#8affffff</color>
-
-    <!--Shortcut background-->
-    <color name="colorBackground">#303030</color>
 </resources>

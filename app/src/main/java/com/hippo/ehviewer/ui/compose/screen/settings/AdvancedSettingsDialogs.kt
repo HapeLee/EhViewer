@@ -17,19 +17,16 @@
  */
 package com.hippo.ehviewer.ui.compose.screen.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,14 +35,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hippo.ehviewer.EhProxySelector
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.ui.compose.component.DialogListItemSpacing
+import com.hippo.ehviewer.ui.compose.component.DialogRadioItem
 
 /**
  * 代理对话框（原 `ProxyPreference`）。
@@ -83,23 +80,13 @@ fun ProxyDialog(
                     .heightIn(max = 420.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                typeLabels.forEachIndexed { index, label ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = index == type,
-                                role = Role.RadioButton,
-                                onClick = { type = index },
-                            )
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = index == type, onClick = null)
-                        Text(
+                // 类型只有几项，用普通 Column：外层已经是 verticalScroll，再套 LazyColumn 会撞高度约束
+                Column(verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing)) {
+                    typeLabels.forEachIndexed { index, label ->
+                        DialogRadioItem(
                             text = label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.padding(start = 8.dp),
+                            selected = index == type,
+                            onClick = { type = index },
                         )
                     }
                 }

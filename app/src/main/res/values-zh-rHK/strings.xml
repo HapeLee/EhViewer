@@ -177,6 +177,7 @@
     <string name="torrent_count">種子 (%d)</string>
     <string name="archive">壓縮包</string>
     <string name="similar_gallery">相似畫廊</string>
+    <string name="tags">標籤</string>
     <string name="no_tags">暫無標籤</string>
     <string name="no_comments">暫無評論</string>
     <string name="more_comment">查看更多評論</string>
@@ -424,6 +425,12 @@
     <string name="settings_read_reading_direction_left_to_right">從左至右</string>
     <string name="settings_read_reading_direction_right_to_Left">從右至左</string>
     <string name="settings_read_reading_direction_top_to_bottom">從上至下</string>
+    <string name="settings_read_reading_direction_webtoon">上下連續捲動</string>
+    <string name="reader_back">返回</string>
+    <string name="reader_menu_pages">目錄</string>
+    <string name="reader_menu_auto_page">自動翻頁</string>
+    <string name="reader_menu_scale">切換縮放</string>
+    <string name="reader_menu_theme">閱讀主題</string>
     <string name="settings_read_page_scaling">頁面縮放</string>
     <string name="settings_read_page_scaling_actual_size">原始尺寸</string>
     <string name="settings_read_page_scaling_fit_to_width">匹配寬度</string>
@@ -581,7 +588,6 @@
     <string name="error_something_wrong_happened">被玩壞了</string>
     <string name="no_browser_installed">請安裝一個瀏覽器。</string>
     <string name="cloudflare_bypass_failed">未能繞過 Cloudflare 驗證</string>
-    <string name="open_in_webview">在 WebView 中打開鏈接以通過驗證？</string>
 
     <!-- Readable Time -->
     <string name="from_the_future">來自未來</string>
@@ -610,4 +616,63 @@
         <item quantity="other">年</item>
     </plurals>
     <string name="night_mode">夜間模式</string>
+
+    <!-- 閱讀器 -->
+    <string name="action_copy">複製</string>
+    <string name="action_menu">選單</string>
+    <string name="action_retry">重試</string>
+    <string name="action_save">儲存</string>
+    <string name="action_save_to">另存為…</string>
+    <string name="action_settings">設定</string>
+    <string name="action_share">分享</string>
+    <string name="blocked_image">已封鎖圖片</string>
+    <string name="custom_filter">顏色濾鏡</string>
+    <string name="decode_image_error">圖片解碼失敗</string>
+    <string name="label_default">預設</string>
+    <string name="left_to_right_viewer">由左至右</string>
+    <string name="right_to_left_viewer">由右至左</string>
+    <string name="vertical_viewer">縱向翻頁</string>
+    <string name="webtoon_viewer">條漫</string>
+    <string name="vertical_plus_viewer">連續縱向</string>
+    <string name="nav_zone_left">左</string>
+    <string name="nav_zone_next">下一頁</string>
+    <string name="nav_zone_prev">上一頁</string>
+    <string name="nav_zone_right">右</string>
+    <string name="pager_viewer">翻頁</string>
+    <string name="permission_denied">權限被拒絕</string>
+    <string name="pref_category_general">一般</string>
+    <string name="pref_category_reading_mode">閱讀模式</string>
+    <string name="pref_color_filter_mode">混合模式</string>
+    <string name="pref_crop_borders">裁切邊框</string>
+    <string name="pref_custom_brightness">自訂亮度</string>
+    <string name="pref_custom_color_filter">自訂顏色濾鏡</string>
+    <string name="pref_cutout_short">避開挖孔區域</string>
+    <string name="pref_double_tap_to_zoom">雙擊縮放</string>
+    <string name="pref_fullscreen">全螢幕</string>
+    <string name="pref_grayscale">灰階</string>
+    <string name="pref_image_scale_type">圖片縮放方式</string>
+    <string name="pref_inverted_colors">反色</string>
+    <string name="pref_keep_screen_on">螢幕恆亮</string>
+    <string name="pref_landscape_zoom">橫向自動放大</string>
+    <string name="pref_navigate_pan">拖曳瀏覽</string>
+    <string name="pref_page_transitions">翻頁動畫</string>
+    <string name="pref_read_with_long_tap">長按操作</string>
+    <string name="pref_read_with_tapping_inverted">反轉點擊區域</string>
+    <string name="pref_reader_theme">閱讀器主題</string>
+    <string name="pref_rotation_type">螢幕方向</string>
+    <string name="pref_show_page_number">顯示頁碼</string>
+    <string name="pref_show_reader_seekbar">顯示進度列</string>
+    <string name="pref_viewer_nav">點擊區域</string>
+    <string name="pref_webtoon_side_padding">兩側留白</string>
+    <string name="pref_zoom_start">初始縮放位置</string>
+    <string name="rotation_force_landscape">強制橫向</string>
+    <string name="rotation_force_portrait">強制直向</string>
+    <string name="rotation_free">自由旋轉</string>
+    <string name="rotation_landscape">橫向</string>
+    <string name="rotation_portrait">直向</string>
+    <string name="rotation_reverse_portrait">反向直向</string>
+    <string name="rotation_type">螢幕方向</string>
+    <string name="show_blocked_image">顯示被封鎖圖片</string>
+    <string name="view_original">查看原圖</string>
+    <string name="viewer">閱讀模式</string>
 </resources>

@@ -21,7 +21,6 @@ import androidx.annotation.IntDef
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.dao.QuickSearch
-import com.hippo.ehviewer.widget.AdvanceSearchTable
 import com.hippo.network.UrlBuilder
 import com.hippo.util.encodeUTF8
 import com.hippo.yorozuya.NumberUtils
@@ -45,6 +44,8 @@ data class ListUrlBuilder(
     var pageFrom: Int = -1,
     var pageTo: Int = -1,
     var isShowExpunged: Boolean = false,
+    /** 语言过滤：`GalleryInfo.S_LANG_TAGS` 的下标，-1 表示不过滤 */
+    var language: Int = -1,
 ) : Parcelable {
     fun reset() {
         mode = MODE_NORMAL
@@ -58,6 +59,7 @@ data class ListUrlBuilder(
         pageFrom = -1
         pageTo = -1
         isShowExpunged = false
+        language = -1
         hash = null
     }
 
@@ -85,6 +87,8 @@ data class ListUrlBuilder(
         pageFrom = q.pageFrom
         pageTo = q.pageTo
         isShowExpunged = false
+        // 快速搜索表里没有语言列，别让上一次搜索的语言残留下来
+        language = -1
     }
 
     fun toQuickSearch(): QuickSearch {
@@ -196,19 +200,19 @@ data class ListUrlBuilder(
                     enableAdvanceSearch = true
                 }
                 "f_sh" -> if ("on" == value) {
-                    advanceSearch = advanceSearch or AdvanceSearchTable.SH
+                    advanceSearch = advanceSearch or AdvanceSearchFlags.SH
                 }
                 "f_sto" -> if ("on" == value) {
-                    advanceSearch = advanceSearch or AdvanceSearchTable.STO
+                    advanceSearch = advanceSearch or AdvanceSearchFlags.STO
                 }
                 "f_sfl" -> if ("on" == value) {
-                    advanceSearch = advanceSearch or AdvanceSearchTable.SFL
+                    advanceSearch = advanceSearch or AdvanceSearchFlags.SFL
                 }
                 "f_sfu" -> if ("on" == value) {
-                    advanceSearch = advanceSearch or AdvanceSearchTable.SFU
+                    advanceSearch = advanceSearch or AdvanceSearchFlags.SFU
                 }
                 "f_sft" -> if ("on" == value) {
-                    advanceSearch = advanceSearch or AdvanceSearchTable.SFT
+                    advanceSearch = advanceSearch or AdvanceSearchFlags.SFT
                 }
                 "f_sr" -> if ("on" == value) {
                     enableMinRating = true
@@ -254,11 +258,20 @@ data class ListUrlBuilder(
             if (this.category != EhUtils.NONE) {
                 ub.addQuery("f_cats", category.inv() and EhUtils.ALL_CATEGORY)
             }
-            // Search key
-            mKeyword?.run {
-                val keyword = trim()
-                if (keyword.isNotEmpty()) {
-                    ub.addQuery("f_search", encodeUTF8(this))
+            // Search key：语言过滤以 `language:xxx` 标签前缀的形式拼进关键词
+            mKeyword?.trim()?.let { keyword ->
+                val query = if (language == -1 ||
+                    "gid:" in keyword ||
+                    "l:" in keyword ||
+                    "language:" in keyword
+                ) {
+                    keyword
+                } else {
+                    val tag = GalleryInfo.S_LANG_TAGS[language]
+                    if (keyword.isEmpty()) tag else "$tag $keyword"
+                }
+                if (query.isNotEmpty()) {
+                    ub.addQuery("f_search", encodeUTF8(query))
                 }
             }
             hash?.let {
@@ -276,11 +289,11 @@ data class ListUrlBuilder(
             // Advance search
             if (advanceSearch != -1) {
                 ub.addQuery("advsearch", "1")
-                if (advanceSearch and AdvanceSearchTable.SH != 0) ub.addQuery("f_sh", "on")
-                if (advanceSearch and AdvanceSearchTable.STO != 0) ub.addQuery("f_sto", "on")
-                if (advanceSearch and AdvanceSearchTable.SFL != 0) ub.addQuery("f_sfl", "on")
-                if (advanceSearch and AdvanceSearchTable.SFU != 0) ub.addQuery("f_sfu", "on")
-                if (advanceSearch and AdvanceSearchTable.SFT != 0) ub.addQuery("f_sft", "on")
+                if (advanceSearch and AdvanceSearchFlags.SH != 0) ub.addQuery("f_sh", "on")
+                if (advanceSearch and AdvanceSearchFlags.STO != 0) ub.addQuery("f_sto", "on")
+                if (advanceSearch and AdvanceSearchFlags.SFL != 0) ub.addQuery("f_sfl", "on")
+                if (advanceSearch and AdvanceSearchFlags.SFU != 0) ub.addQuery("f_sfu", "on")
+                if (advanceSearch and AdvanceSearchFlags.SFT != 0) ub.addQuery("f_sft", "on")
                 // Set min star
                 if (minRating != -1) {
                     ub.addQuery("f_sr", "on")

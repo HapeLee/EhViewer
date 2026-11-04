@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright 2026 EhViewer contributors
+  ~
+  ~ This file is part of EhViewer
+  ~
+  ~ EhViewer is free software: you can redistribute it and/or
+  ~ modify it under the terms of the GNU General Public License as
+  ~ published by the Free Software Foundation, either version 3 of the
+  ~ License, or (at your option) any later version.
+  ~
+  ~ EhViewer is distributed in the hope that it will be useful, but
+  ~ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  ~ or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License along with EhViewer.
+  ~ If not, see <https://www.gnu.org/licenses/>.
+  -->
+
+<resources>
+    <!--
+        左侧导航抽屉的条目 id。
+
+        抽屉本身已经是 Compose（`MainShell`），但「当前勾选哪一项」仍用 id 表达：
+        `EhRoute.navCheckedItem` 与 `GalleryListViewModel.navCheckedRes` 都按这套 id 通信，
+        换成枚举会牵动 5 个文件且没有行为收益。原先这些 id 由 `menu/nav_drawer_main.xml`
+        顺带声明，菜单删掉后改在这里显式登记。
+    -->
+    <item name="nav_homepage" type="id" />
+    <item name="nav_subscription" type="id" />
+    <item name="nav_whats_hot" type="id" />
+    <item name="nav_toplist" type="id" />
+    <item name="nav_favourite" type="id" />
+    <item name="nav_history" type="id" />
+    <item name="nav_downloads" type="id" />
+    <item name="nav_settings" type="id" />
+</resources>

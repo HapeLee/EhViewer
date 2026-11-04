@@ -30,6 +30,8 @@ import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -66,15 +68,31 @@ object EhTagDatabase {
 
     private fun JSONObject.toTagGroup(): TagGroup = keys().asSequence().associateWith { getString(it) }
 
+    /**
+     * 翻译库版本号：每次 [updateData] 换上一份新数据就 +1。
+     *
+     * 给 Compose 订阅用——刚在设置里打开「显示标签翻译」时数据可能还在下载，
+     * 页面读一下这个 flow 就能在下完后自己刷新，不用退出重进。
+     */
+    private val versionState = MutableStateFlow(0)
+    val versionFlow: StateFlow<Int>
+        get() = versionState
+
     private fun updateData(source: BufferedSource) {
         try {
             tagGroups = JSONObject(source.readString(StandardCharsets.UTF_8)).toTagGroups()
+            versionState.value += 1
         } catch (e: JSONException) {
             Log.e(TAG, "Error", e)
         }
     }
 
-    fun getTranslation(prefix: String? = NAMESPACE_PREFIX, tag: String?): String? = tagGroups[prefix]?.get(tag)?.trim()?.takeIf { it.isNotEmpty() }
+    // 翻译库还没就绪时（首次启动正在下载）直接返回 null，别让调用方撞上 lateinit
+    fun getTranslation(prefix: String? = NAMESPACE_PREFIX, tag: String?): String? = if (!isInitialized()) {
+        null
+    } else {
+        tagGroups[prefix]?.get(tag)?.trim()?.takeIf { it.isNotEmpty() }
+    }
 
     private fun internalSuggestFlow(
         tags: Map<String, String>,

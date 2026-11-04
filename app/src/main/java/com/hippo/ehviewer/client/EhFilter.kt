@@ -32,12 +32,14 @@ object EhFilter {
     private val mCommenterFilterList: MutableList<Filter> = ArrayList()
     private val mCommentFilterList: MutableList<Filter> = ArrayList()
 
-    private const val MODE_TITLE = 0
+    // 编号就是数据库里的 MODE 值，也是 `array/filter_entries` 的下标；
+    // 过滤器页要按这六个分组排列，所以全部放开可见性（原来是两公开四私有）
+    const val MODE_TITLE = 0
     const val MODE_UPLOADER = 1
     const val MODE_TAG = 2
-    private const val MODE_TAG_NAMESPACE = 3
+    const val MODE_TAG_NAMESPACE = 3
     const val MODE_COMMENTER = 4
-    private const val MODE_COMMENT = 5
+    const val MODE_COMMENT = 5
     private val TAG = EhFilter::class.java.simpleName
 
     /**

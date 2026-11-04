@@ -42,10 +42,13 @@ interface EhHostState {
     fun showTip(message: CharSequence, length: Int)
     fun showTip(@StringRes id: Int, length: Int)
 
+    /** 投递宿主级对话框，见 [DialogRequest] */
+    fun showDialog(request: DialogRequest)
+
     /** @param resId 0 for clear */
     fun setNavCheckedItem(@IdRes resId: Int)
-    fun setDrawerLockMode(lockMode: Int, edgeGravity: Int)
-    fun toggleDrawer(drawerGravity: Int)
+    fun setLeftDrawerEnabled(enabled: Boolean)
+    fun toggleLeftDrawer()
     fun updateProfile()
     fun hideSoftInput()
 }
@@ -92,9 +95,10 @@ fun OnHostResume(action: () -> Unit) {
 private object NoOpEhHost : EhHostState {
     override fun showTip(message: CharSequence, length: Int) = Unit
     override fun showTip(id: Int, length: Int) = Unit
+    override fun showDialog(request: DialogRequest) = Unit
     override fun setNavCheckedItem(resId: Int) = Unit
-    override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) = Unit
-    override fun toggleDrawer(drawerGravity: Int) = Unit
+    override fun setLeftDrawerEnabled(enabled: Boolean) = Unit
+    override fun toggleLeftDrawer() = Unit
     override fun updateProfile() = Unit
     override fun hideSoftInput() = Unit
 }

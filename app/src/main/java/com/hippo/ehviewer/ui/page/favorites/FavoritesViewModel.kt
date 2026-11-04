@@ -24,6 +24,7 @@ import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hippo.ehviewer.EhApplication.Companion.searchDatabase
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
@@ -383,6 +384,10 @@ class FavoritesViewModel(private val appContext: Context) : ViewModel() {
 
     fun applySearch(query: String) {
         if (searchMode) searchMode = false
+        // 记进搜索历史，下次在搜索条里联想得到（与画廊列表页一致）
+        if (query.isNotBlank()) {
+            viewModelScope.launchIO { runCatching { searchDatabase.addQuery(query) } }
+        }
         urlBuilder.keyword = query.takeIf { it.isNotBlank() }
         appliedKeyword = urlBuilder.keyword.orEmpty()
         updateHeader()

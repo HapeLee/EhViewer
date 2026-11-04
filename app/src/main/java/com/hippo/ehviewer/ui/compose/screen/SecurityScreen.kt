@@ -26,9 +26,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -51,6 +53,11 @@ fun SecurityScreen(
     onViewCreated: (LockPatternView) -> Unit,
     onBiometricClick: () -> Unit,
 ) {
+    // 九宫格自己是 View，读不到 Compose 主题：三态颜色按当前色板传进去，
+    // 否则深色页面上只剩「54% 黑」的默认色，等于看不见
+    val regularColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+    val successColor = MaterialTheme.colorScheme.primary.toArgb()
+    val errorColor = MaterialTheme.colorScheme.error.toArgb()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -79,6 +86,7 @@ fun SecurityScreen(
                     onViewCreated(this)
                 }
             },
+            update = { view -> view.setPatternColors(regularColor, successColor, errorColor) },
             modifier = Modifier
                 .padding(32.dp)
                 .fillMaxWidth()

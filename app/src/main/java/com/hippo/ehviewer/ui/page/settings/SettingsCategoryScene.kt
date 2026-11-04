@@ -27,6 +27,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.biometric.BiometricManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,7 +50,6 @@ import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.UrlOpener
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhTagDatabase
-import com.hippo.ehviewer.ui.SettingsActivity
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.SettingsPage
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
@@ -58,10 +58,12 @@ import com.hippo.ehviewer.ui.compose.screen.settings.AdvancedSettingsScreen
 import com.hippo.ehviewer.ui.compose.screen.settings.DownloadLocationDialog
 import com.hippo.ehviewer.ui.compose.screen.settings.DownloadSettingsScreen
 import com.hippo.ehviewer.ui.compose.screen.settings.EhSettingsScreen
+import com.hippo.ehviewer.ui.compose.screen.settings.FilterSettingsScreen
 import com.hippo.ehviewer.ui.compose.screen.settings.ImageLimitsDialog
 import com.hippo.ehviewer.ui.compose.screen.settings.PrivacySettingsScreen
 import com.hippo.ehviewer.ui.compose.screen.settings.ProxyDialog
 import com.hippo.ehviewer.ui.compose.screen.settings.ReadSettingsScreen
+import com.hippo.ehviewer.ui.compose.screen.settings.SecurityPatternScreen
 import com.hippo.ehviewer.ui.compose.screen.settings.UserAgentDialog
 import com.hippo.ehviewer.ui.host.OnHostResume
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_SHORT
@@ -75,10 +77,9 @@ import kotlinx.coroutines.launch
 /**
  * 设置分类页的分流入口。
  *
- * 五个分类页都已经就地渲染；剩下的四个编辑器（UConfig / 我的标签 / 过滤器 / 手势锁）
- * 仍然交给 [SettingsActivity]，起完 Activity 立刻把这条 route 弹掉——否则返回键会先
- * 回到一个空白页。等这四个编辑器也迁完，`SettingsActivity` 与 `BaseFragment` 之外的
- * 这条老链路就可以整体删除。
+ * 九个设置子页全部就地渲染，`when` 因此是穷尽的：加页时编译器会强制这里跟着改，
+ * 不会再出现「点进去是一个空白壳」的过渡态。老的 `SettingsActivity` 与 `BaseFragment`
+ * 那条链路已经删干净。
  */
 @Composable
 fun SettingsCategoryScene(route: EhRoute.SettingsCategory) {
@@ -88,18 +89,30 @@ fun SettingsCategoryScene(route: EhRoute.SettingsCategory) {
         SettingsPage.PRIVACY -> PrivacySettingsScene()
         SettingsPage.DOWNLOAD -> DownloadSettingsScene()
         SettingsPage.ADVANCED -> AdvancedSettingsScene()
-        else -> LegacySettingsPage(route.page)
+        SettingsPage.UCONFIG, SettingsPage.MY_TAGS -> WebEditorScene(route.page)
+        SettingsPage.FILTER -> FilterSettingsScene()
+        SettingsPage.SECURITY -> SecurityPatternScene()
     }
 }
 
+/**
+ * 过滤器页。
+ *
+ * 数据在 [com.hippo.ehviewer.client.EhFilter] 的内存分组里，`FilterSettingsViewModel`
+ * 只负责「快照 + 写库后重建」；空态、对话框这些纯 UI 都在 `FilterSettingsScreen`。
+ */
 @Composable
-private fun LegacySettingsPage(page: SettingsPage) {
-    val context = LocalContext.current
+private fun FilterSettingsScene() {
     val navigator = ehNavigator()
-    LaunchedEffect(page) {
-        context.startActivity(SettingsActivity.newIntent(context, page))
-        navigator.pop()
-    }
+    val vm = viewModel { FilterSettingsViewModel() }
+
+    FilterSettingsScreen(
+        entries = vm.entries,
+        onBack = navigator::pop,
+        onAdd = vm::add,
+        onToggle = vm::toggle,
+        onDelete = vm::delete,
+    )
 }
 
 @Composable
@@ -113,7 +126,8 @@ private fun PrivacySettingsScene() {
     val navigator = ehNavigator()
     val host = ehHostOrNoOp()
     val scope = rememberCoroutineScope()
-    // 手势锁在另一个 Activity 里设置，回来时靠宿主的 resume 回调重读一次摘要
+    // 手势锁页现在就在同一条返回栈上：pop 回来本页会重新组合，读数自然是新的。
+    // 这里的 resume 计数只兜住「从系统设置等外部页面回来」的改动。
     var resumeCount by remember { mutableIntStateOf(0) }
     OnHostResume { resumeCount++ }
     val patternSet = remember(resumeCount) { !Settings.security.isNullOrEmpty() }
@@ -127,6 +141,30 @@ private fun PrivacySettingsScene() {
                 searchDatabase.clearQuery()
                 host.showTip(R.string.settings_privacy_clear_search_history_cleared, TIP_LENGTH_SHORT)
             }
+        },
+    )
+}
+
+@Composable
+private fun SecurityPatternScene() {
+    val context = LocalContext.current
+    val navigator = ehNavigator()
+    val biometricAvailable = remember {
+        BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    SecurityPatternScreen(
+        initialPattern = Settings.security,
+        biometricAvailable = biometricAvailable,
+        initialFingerprintEnabled = Settings.enableFingerprint,
+        onCancel = navigator::pop,
+        onConfirm = { pattern, cellSize, enableFingerprint ->
+            // 与老的 SetSecurityFragment 同一口径：格子数 ≤ 1 视为清除
+            val security = if (cellSize <= 1) "" else pattern
+            Settings.putSecurity(security)
+            Settings.putEnableFingerprint(biometricAvailable && enableFingerprint && security.isNotEmpty())
+            navigator.pop()
         },
     )
 }
@@ -160,7 +198,10 @@ private fun EhSettingsScene() {
         onOpenFilter = { navigator.push(EhRoute.SettingsCategory(SettingsPage.FILTER)) },
         onOpenUrl = { url -> UrlOpener.openUrl(context, url, true) },
         onThemeChanged = { value ->
-            // 夜间模式是进程级开关，改完重建宿主才能让整棵树换主题
+            // 值已经由 ListPreferenceRow 落盘。`Settings.theme` 真正生效的地方是
+            // `EhActivity.attachBaseContext`（FragmentActivity 收不到 AppCompatDelegate
+            // 的派发），所以这里只需要重建宿主；顺带给 AppCompat 的静态开关也同步一份，
+            // 免得它自己派发的对话框（AppCompatDialog）算出另一套明暗
             AppCompatDelegate.setDefaultNightMode(value)
             context.findActivity()?.recreate()
         },

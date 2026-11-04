@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,30 +41,49 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Reorder
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -73,16 +94,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
@@ -92,7 +112,17 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.getThumbKey
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.ui.compose.component.CategoryBadge
+import com.hippo.ehviewer.ui.compose.component.DialogListItem
+import com.hippo.ehviewer.ui.compose.component.DialogListItemSpacing
+import com.hippo.ehviewer.ui.compose.component.DialogRadioItem
+import com.hippo.ehviewer.ui.compose.component.EhFabAction
+import com.hippo.ehviewer.ui.compose.component.EhFabMenu
+import com.hippo.ehviewer.ui.compose.component.EhSearchBarPage
+import com.hippo.ehviewer.ui.compose.component.GalleryItemLayout
+import com.hippo.ehviewer.ui.compose.component.ListItemShape
 import com.hippo.ehviewer.ui.compose.component.RatingBar
+import com.hippo.ehviewer.ui.compose.component.SearchHistorySuggestionList
+import com.hippo.ehviewer.ui.compose.component.rememberSearchBarScrollState
 import com.hippo.yorozuya.FileUtils
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -134,6 +164,8 @@ data class DownloadsUiState(
     val typeFilter: Int = -1,
     val keyword: String? = null,
     val scrollToGid: Long? = null,
+    /** 列表 / 网格形态，取值见 [GalleryItemLayout] */
+    val listMode: Int = GalleryItemLayout.GRID,
     val version: Int = 0,
 )
 
@@ -141,17 +173,23 @@ data class DownloadsUiState(
  * 下载页（原 `scene_download.xml` + `DownloadsScene` 的界面部分）。
  *
  * 结构调整：
- * - 左侧导航抽屉仍归宿主；右侧「下载标签」抽屉搬进场景内的 `ModalNavigationDrawer`
- *   （RTL 镜像到右侧、`gesturesEnabled = false`，只由顶栏图标打开）
+ * - 左侧导航抽屉仍归宿主；「下载标签」从右侧抽屉改成 bottom sheet（见 [LabelSheet]）：
+ *   抽屉形态想避开宿主左侧抽屉的手势就得关掉 `gesturesEnabled`，连关闭手势一起没了
+ * - 顶栏换成列表页统一的那根 M3 搜索条（[EhSearchBarPage]）：收起时是标题 + 抽屉按钮
+ *   + 列表/网格切换 + 溢出菜单，点开就地搜下载标题（与「过滤 → 标题」共用一个槽位）
  * - 7 个 FAB 的多选操作台改成「多选顶栏 + 溢出菜单」：关闭、已选数量、全选、置顶 / 开始 / 停止 / 移动 / 删除
- * - 顶部菜单收敛成「过滤 / 全部开始 / 全部停止 / 溢出（排序 / 重置阅读进度 / 反向开始 / 标签抽屉）」
- * - 列表从 `AutoStaggeredGridLayoutManager` 换成自适应列宽的 `LazyVerticalGrid`
+ * - 普通态的动作收敛成「FAB（刷新 / 排序 / 筛选）+ 溢出（全部开始 / 全部停止 / 反向开始 / 重置进度 / 标签）」
+ * - 列表既支持自适应列宽的网格（[DownloadCard]），也支持列表（[DownloadListItem]），
+ *   形态由 [DownloadsUiState.listMode] 决定
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     state: DownloadsUiState,
     onOpenNavDrawer: () -> Unit,
+    onRefresh: () -> Unit,
+    onToggleListMode: () -> Unit,
+    onSearch: (String) -> Unit,
     onToggleSelect: (Long) -> Unit,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
@@ -180,10 +218,17 @@ fun DownloadsScreen(
     onScrollToGidDone: () -> Unit,
 ) {
     val gridState = rememberLazyGridState()
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val listState = rememberLazyListState()
+    // 1.5 里 rememberModalBottomSheetState 已废弃，新的这版必须显式传初始值 Hidden
+    val sheetState = rememberBottomSheetState(SheetValue.Hidden)
+    var sheetVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    // 搜索条收缩位移 + FAB 显隐：与画廊列表页共用同一套状态机
+    val scroll = rememberSearchBarScrollState()
 
+    var searchExpanded by remember { mutableStateOf(false) }
+    var query by remember(state.keyword) { mutableStateOf(state.keyword.orEmpty()) }
     var overflowVisible by remember { mutableStateOf(false) }
     var filterTypeDialog by remember { mutableStateOf(false) }
     var filterTitleDialog by remember { mutableStateOf(false) }
@@ -196,95 +241,237 @@ fun DownloadsScreen(
     var defaultLabelDialog by remember { mutableStateOf(false) }
     var labelMenuTarget by remember { mutableStateOf<String?>(null) }
 
-    BackHandler(enabled = drawerState.isOpen) {
-        scope.launch { drawerState.close() }
-    }
+    // 搜索条展开时返回键先收起它，而不是退出页面
+    BackHandler(enabled = searchExpanded) { searchExpanded = false }
 
-    LaunchedEffect(state.scrollToGid, state.items) {
+    LaunchedEffect(state.scrollToGid, state.items, state.listMode) {
         val gid = state.scrollToGid ?: return@LaunchedEffect
         val index = state.items.indexOfFirst { it.gid == gid }
-        if (index >= 0) gridState.scrollToItem(index)
+        if (index >= 0) {
+            if (state.listMode == GalleryItemLayout.GRID) {
+                gridState.scrollToItem(index)
+            } else {
+                listState.scrollToItem(index)
+            }
+        }
         onScrollToGidDone()
     }
 
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = false,
-            drawerContent = {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    ModalDrawerSheet {
-                        LabelDrawer(
-                            state = state,
-                            onSelectLabel = {
-                                scope.launch { drawerState.close() }
-                                onSelectLabel(it)
-                            },
-                            onLongClickLabel = { labelMenuTarget = it },
-                            onMoveLabel = onMoveLabel,
-                            onAddLabel = { addLabelDialog = true },
-                            onSetDefaultLabel = { defaultLabelDialog = true },
-                            rowHeightPx = with(density) { LABEL_ROW_HEIGHT.toPx() },
-                        )
-                    }
-                }
-            },
-        ) {
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Column(Modifier.fillMaxSize()) {
-                    if (state.selectionMode) {
-                        SelectionTopBar(
-                            state = state,
-                            onClose = onClearSelection,
-                            onSelectAll = onSelectAll,
-                            onPinTop = onPinTopSelected,
-                            onStart = onStartSelected,
-                            onStop = onStopSelected,
-                            onMove = { moveDialog = true },
-                            onDelete = { deleteDialog = true },
-                        )
-                    } else {
-                        DownloadsTopBar(
-                            title = state.title,
-                            onOpenNavDrawer = onOpenNavDrawer,
-                            onFilter = { filterTypeDialog = true },
-                            onStartAll = onStartAll,
-                            onStopAll = onStopAll,
-                            onOpenLabels = { scope.launch { drawerState.open() } },
-                            overflowVisible = overflowVisible,
-                            onOverflowVisibleChange = { overflowVisible = it },
-                            onSort = { sortDialog = true },
-                            onResetReadingProgress = onResetReadingProgress,
-                            onStartAllReversed = onStartAllReversed,
-                        )
-                    }
-
-                    if (state.items.isEmpty()) {
-                        EmptyTip()
-                    } else {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(132.dp),
-                            state = gridState,
-                            contentPadding = PaddingValues(8.dp),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            gridItems(items = state.items, key = { it.gid }) { item ->
-                                DownloadCard(
-                                    item = item,
-                                    selectionMode = state.selectionMode,
-                                    onClick = {
-                                        if (state.selectionMode) onToggleSelect(item.gid) else onRead(item.gid)
-                                    },
-                                    onLongClick = { onToggleSelect(item.gid) },
-                                    onThumbClick = { onOpenDetail(item.gid) },
-                                    onStart = { onStartOne(item.gid) },
-                                    onStop = { onStopOne(item.gid) },
-                                )
-                            }
-                        }
-                    }
+    val content: @Composable (PaddingValues) -> Unit = { padding ->
+        val contentPadding = PaddingValues(
+            start = 8.dp,
+            end = 8.dp,
+            top = padding.calculateTopPadding() + 8.dp,
+            bottom = padding.calculateBottomPadding() + 8.dp,
+        )
+        when {
+            state.items.isEmpty() -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+            ) {
+                EmptyTip()
+            }
+            state.listMode == GalleryItemLayout.GRID -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(132.dp),
+                state = gridState,
+                contentPadding = contentPadding,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(scroll.connection),
+            ) {
+                gridItems(items = state.items, key = { it.gid }) { item ->
+                    DownloadCard(
+                        item = item,
+                        selectionMode = state.selectionMode,
+                        onClick = {
+                            if (state.selectionMode) onToggleSelect(item.gid) else onRead(item.gid)
+                        },
+                        onLongClick = { onToggleSelect(item.gid) },
+                        onThumbClick = { onOpenDetail(item.gid) },
+                        onStart = { onStartOne(item.gid) },
+                        onStop = { onStopOne(item.gid) },
+                    )
                 }
             }
+            else -> LazyColumn(
+                state = listState,
+                contentPadding = contentPadding,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(scroll.connection),
+            ) {
+                items(items = state.items, key = { it.gid }) { item ->
+                    DownloadListItem(
+                        item = item,
+                        selectionMode = state.selectionMode,
+                        onClick = {
+                            if (state.selectionMode) onToggleSelect(item.gid) else onRead(item.gid)
+                        },
+                        onLongClick = { onToggleSelect(item.gid) },
+                        onThumbClick = { onOpenDetail(item.gid) },
+                        onStart = { onStartOne(item.gid) },
+                        onStop = { onStopOne(item.gid) },
+                    )
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomEnd,
+    ) {
+        if (state.selectionMode) {
+            // 多选态仍用上下文顶栏：这时搜索条没有意义，先让位给批量操作
+            val behavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+            Scaffold(
+                modifier = Modifier.nestedScroll(behavior.nestedScrollConnection),
+                topBar = {
+                    SelectionTopBar(
+                        state = state,
+                        onClose = onClearSelection,
+                        onSelectAll = onSelectAll,
+                        onPinTop = onPinTopSelected,
+                        onStart = onStartSelected,
+                        onStop = onStopSelected,
+                        onMove = { moveDialog = true },
+                        onDelete = { deleteDialog = true },
+                        scrollBehavior = behavior,
+                    )
+                },
+            ) { padding -> content(padding) }
+        } else {
+            EhSearchBarPage(
+                title = state.title,
+                hint = stringResource(R.string.favorites_search_bar_hint, state.title),
+                query = query,
+                expanded = searchExpanded,
+                onQueryChange = { query = it },
+                onApplySearch = onSearch,
+                onExpandedChange = {
+                    searchExpanded = it
+                    scroll.reset(hideFab = it)
+                },
+                onOpenDrawer = onOpenNavDrawer,
+                searchBarOffsetY = { scroll.offsetY },
+                trailingIcon = {
+                    // 列表 / 网格形态切换（对应参考项目下载页顶栏的那颗图标）
+                    IconButton(onClick = onToggleListMode) {
+                        Icon(
+                            imageVector = if (state.listMode == GalleryItemLayout.GRID) {
+                                Icons.AutoMirrored.Filled.ViewList
+                            } else {
+                                Icons.Filled.GridView
+                            },
+                            contentDescription = stringResource(
+                                if (state.listMode == GalleryItemLayout.GRID) {
+                                    R.string.list_mode
+                                } else {
+                                    R.string.grid_mode
+                                },
+                            ),
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { overflowVisible = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = overflowVisible,
+                            onDismissRequest = { overflowVisible = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.download_start_all)) },
+                                onClick = {
+                                    overflowVisible = false
+                                    onStartAll()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.download_stop_all)) },
+                                onClick = {
+                                    overflowVisible = false
+                                    onStopAll()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.download_start_all_reversed)) },
+                                onClick = {
+                                    overflowVisible = false
+                                    onStartAllReversed()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.download_reset_reading_progress)) },
+                                onClick = {
+                                    overflowVisible = false
+                                    onResetReadingProgress()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.download_labels)) },
+                                onClick = {
+                                    overflowVisible = false
+                                    sheetVisible = true
+                                },
+                            )
+                        }
+                    }
+                },
+                expandedContent = {
+                    SearchHistorySuggestionList(
+                        query = query,
+                        onPick = { picked ->
+                            query = picked
+                            onSearch(picked)
+                        },
+                    )
+                },
+            ) { padding -> content(padding) }
+        }
+
+        if (!state.selectionMode) {
+            Box(Modifier.navigationBarsPadding()) {
+                EhFabMenu(
+                    visible = !scroll.fabHidden,
+                    actions = listOf(
+                        EhFabAction(Icons.Filled.Refresh, stringResource(R.string.refresh), onRefresh),
+                        EhFabAction(
+                            Icons.AutoMirrored.Filled.Sort,
+                            stringResource(R.string.download_sort_by),
+                        ) { sortDialog = true },
+                        EhFabAction(
+                            Icons.Filled.FilterList,
+                            stringResource(R.string.download_filter),
+                        ) { filterTypeDialog = true },
+                    ),
+                )
+            }
+        }
+    }
+
+    if (sheetVisible) {
+        // 收起动画跑完再销毁，直接置 false 会把 sheet 硬切掉
+        fun hideSheet() {
+            scope.launch { sheetState.hide() }.invokeOnCompletion { sheetVisible = false }
+        }
+        ModalBottomSheet(
+            onDismissRequest = { sheetVisible = false },
+            sheetState = sheetState,
+        ) {
+            LabelSheet(
+                state = state,
+                onSelectLabel = { label ->
+                    onSelectLabel(label)
+                    hideSheet()
+                },
+                onLongClickLabel = { labelMenuTarget = it },
+                onMoveLabel = onMoveLabel,
+                onAddLabel = { addLabelDialog = true },
+                onSetDefaultLabel = { defaultLabelDialog = true },
+                rowHeightPx = with(density) { LABEL_ROW_HEIGHT.toPx() },
+            )
         }
     }
 
@@ -374,21 +561,17 @@ fun DownloadsScreen(
             onDismissRequest = { moveDialog = false },
             title = { Text(stringResource(R.string.download_move_dialog_title)) },
             text = {
-                Column {
-                    options.forEachIndexed { index, label ->
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .combinedClickable(
-                                    onClick = {
-                                        moveDialog = false
-                                        onMoveSelected(if (index == 0) null else label)
-                                    },
-                                    onLongClick = {},
-                                )
-                                .padding(vertical = 12.dp),
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing),
+                ) {
+                    items(options.size) { index ->
+                        DialogListItem(
+                            text = options[index],
+                            onClick = {
+                                moveDialog = false
+                                onMoveSelected(if (index == 0) null else options[index])
+                            },
                         )
                     }
                 }
@@ -474,34 +657,20 @@ fun DownloadsScreen(
             onDismissRequest = { labelMenuTarget = null },
             title = { Text(target) },
             text = {
-                Column {
-                    Text(
+                Column(verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing)) {
+                    DialogListItem(
                         text = stringResource(R.string.rename_label),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = {
-                                    labelMenuTarget = null
-                                    renameLabelTarget = target
-                                },
-                                onLongClick = {},
-                            )
-                            .padding(vertical = 12.dp),
+                        onClick = {
+                            labelMenuTarget = null
+                            renameLabelTarget = target
+                        },
                     )
-                    Text(
+                    DialogListItem(
                         text = stringResource(R.string.delete),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = {
-                                    labelMenuTarget = null
-                                    deleteLabelTarget = target
-                                },
-                                onLongClick = {},
-                            )
-                            .padding(vertical = 12.dp),
+                        onClick = {
+                            labelMenuTarget = null
+                            deleteLabelTarget = target
+                        },
                     )
                 }
             },
@@ -514,93 +683,178 @@ fun DownloadsScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 列表形态的下载条目：缩略图在左，标题 / 状态 / 进度在右，右下角是开始 / 停止。
+ *
+ * 网格卡片（[DownloadCard]）讲究封面，列表形态则优先「一屏能看多少条 + 进度条够不够宽」，
+ * 两者共用同一份 [DownloadItemUi]，点击 / 长按 / 封面的语义完全一致。
+ */
 @Composable
-private fun DownloadsTopBar(
-    title: String,
-    onOpenNavDrawer: () -> Unit,
-    onFilter: () -> Unit,
-    onStartAll: () -> Unit,
-    onStopAll: () -> Unit,
-    onOpenLabels: () -> Unit,
-    overflowVisible: Boolean,
-    onOverflowVisibleChange: (Boolean) -> Unit,
-    onSort: () -> Unit,
-    onResetReadingProgress: () -> Unit,
-    onStartAllReversed: () -> Unit,
+private fun DownloadListItem(
+    item: DownloadItemUi,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onThumbClick: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
 ) {
-    TopAppBar(
-        title = {
-            Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val context = LocalPlatformContext.current
+    val thumbKey = remember(item.gid) { getThumbKey(item.gid) }
+    val request = remember(thumbKey, item.thumbUrl) {
+        ImageRequest.Builder(context)
+            .data(item.thumbUrl)
+            .apply {
+                memoryCacheKey(thumbKey)
+                diskCacheKey(thumbKey)
+            }
+            .crossfade(true)
+            .build()
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        colors = if (item.selected) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        } else {
+            CardDefaults.cardColors()
         },
-        navigationIcon = {
-            IconButton(onClick = onOpenNavDrawer) {
-                Icon(painterResource(R.drawable.ic_baseline_menu_24), contentDescription = null)
-            }
+        border = if (item.selected) {
+            androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
         },
-        actions = {
-            IconButton(onClick = onFilter) {
-                Icon(
-                    painterResource(R.drawable.v_filter_dark_x24),
-                    contentDescription = stringResource(R.string.download_filter),
-                )
-            }
-            IconButton(onClick = onStartAll) {
-                Icon(
-                    painterResource(R.drawable.v_play_x24),
-                    contentDescription = stringResource(R.string.download_start_all),
-                )
-            }
-            IconButton(onClick = onStopAll) {
-                Icon(
-                    painterResource(R.drawable.v_pause_x24),
-                    contentDescription = stringResource(R.string.download_stop_all),
-                )
-            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(8.dp),
+        ) {
             Box {
-                IconButton(onClick = { onOverflowVisibleChange(true) }) {
+                AsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .height(DOWNLOAD_LIST_THUMB_HEIGHT)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .combinedClickable(onClick = onThumbClick, onLongClick = onLongClick),
+                )
+                CategoryBadge(
+                    category = item.category,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp),
+                )
+                if (selectionMode && item.selected) {
                     Icon(
-                        painterResource(R.drawable.v_more_vert_dark_x24),
+                        imageVector = Icons.Filled.Check,
                         contentDescription = null,
-                    )
-                }
-                DropdownMenu(
-                    expanded = overflowVisible,
-                    onDismissRequest = { onOverflowVisibleChange(false) },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.download_sort_by)) },
-                        onClick = {
-                            onOverflowVisibleChange(false)
-                            onSort()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.download_start_all_reversed)) },
-                        onClick = {
-                            onOverflowVisibleChange(false)
-                            onStartAllReversed()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.download_reset_reading_progress)) },
-                        onClick = {
-                            onOverflowVisibleChange(false)
-                            onResetReadingProgress()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.download_labels)) },
-                        onClick = {
-                            onOverflowVisibleChange(false)
-                            onOpenLabels()
-                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .size(16.dp),
                     )
                 }
             }
-        },
-    )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(DOWNLOAD_LIST_THUMB_HEIGHT)
+                    .padding(start = 8.dp),
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.weight(1f))
+                if (item.state == DownloadInfo.STATE_DOWNLOAD) {
+                    if (item.total > 0 && item.finished >= 0) {
+                        LinearProgressIndicator(
+                            progress = { item.finished.toFloat() / item.total },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            text = if (item.total > 0 && item.finished >= 0) {
+                                "${item.finished} / ${item.total}"
+                            } else {
+                                ""
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = FileUtils.humanReadableByteCount(item.speed.coerceAtLeast(0), false) + "/S",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RatingBar(rating = item.rating)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = stateText(item),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            // 开始 / 停止：贴右边缘，和卡片同一行高度居中
+            Box(
+                modifier = Modifier
+                    .height(DOWNLOAD_LIST_THUMB_HEIGHT)
+                    .padding(start = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                IconButton(
+                    onClick = if (item.state == DownloadInfo.STATE_WAIT ||
+                        item.state == DownloadInfo.STATE_DOWNLOAD
+                    ) {
+                        onStop
+                    } else {
+                        onStart
+                    },
+                ) {
+                    Icon(
+                        imageVector = if (item.state == DownloadInfo.STATE_WAIT ||
+                            item.state == DownloadInfo.STATE_DOWNLOAD
+                        ) {
+                            Icons.Filled.Pause
+                        } else {
+                            Icons.Filled.PlayArrow
+                        },
+                        contentDescription = stringResource(
+                            if (item.state == DownloadInfo.STATE_WAIT ||
+                                item.state == DownloadInfo.STATE_DOWNLOAD
+                            ) {
+                                R.string.download_stop
+                            } else {
+                                R.string.download_start
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+    }
 }
+
+private val DOWNLOAD_LIST_THUMB_HEIGHT = 96.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -613,30 +867,28 @@ private fun SelectionTopBar(
     onStop: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
+    scrollBehavior: TopAppBarScrollBehavior,
 ) {
     var moreVisible by remember { mutableStateOf(false) }
-    TopAppBar(
+    LargeTopAppBar(
         navigationIcon = {
             IconButton(onClick = onClose) {
-                Icon(painterResource(R.drawable.v_close_dark_x24), contentDescription = null)
+                Icon(Icons.Filled.Close, contentDescription = null)
             }
         },
         title = {
-            Text(
-                text = state.selectedCount.toString(),
-                style = MaterialTheme.typography.titleLarge,
-            )
+            Text(text = state.selectedCount.toString())
         },
         actions = {
             IconButton(onClick = onSelectAll) {
                 Icon(
-                    painterResource(R.drawable.v_check_all_dark_x24),
+                    Icons.Filled.SelectAll,
                     contentDescription = stringResource(R.string.check_all),
                 )
             }
             Box {
                 IconButton(onClick = { moreVisible = true }) {
-                    Icon(painterResource(R.drawable.v_more_vert_dark_x24), contentDescription = null)
+                    Icon(Icons.Filled.MoreVert, contentDescription = null)
                 }
                 DropdownMenu(expanded = moreVisible, onDismissRequest = { moreVisible = false }) {
                     DropdownMenuItem(
@@ -677,6 +929,7 @@ private fun SelectionTopBar(
                 }
             }
         },
+        scrollBehavior = scrollBehavior,
     )
 }
 
@@ -726,13 +979,14 @@ private fun DownloadCard(
                 AsyncImage(
                     model = request,
                     contentDescription = null,
-                    placeholder = painterResource(R.drawable.big_download),
-                    error = painterResource(R.drawable.big_download),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(2f / 3f)
                         .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                        // 占位不再用 big_download 矢量（会被 Crop 切掉一半、还得靠 XML 主题
+                        // 属性上色），直接铺一块表面色；加载完成后图会盖住它
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         .combinedClickable(onClick = onThumbClick, onLongClick = onLongClick),
                 )
                 CategoryBadge(
@@ -743,7 +997,7 @@ private fun DownloadCard(
                 )
                 if (selectionMode && item.selected) {
                     Icon(
-                        painter = painterResource(R.drawable.v_check_all_dark_x24),
+                        imageVector = Icons.Filled.Check,
                         contentDescription = null,
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -759,7 +1013,7 @@ private fun DownloadCard(
                     ) {
                         IconButton(onClick = onStop, modifier = Modifier.size(32.dp)) {
                             Icon(
-                                painterResource(R.drawable.v_pause_x24),
+                                Icons.Filled.Pause,
                                 contentDescription = stringResource(R.string.download_stop),
                                 modifier = Modifier.size(18.dp),
                             )
@@ -772,7 +1026,7 @@ private fun DownloadCard(
                     ) {
                         IconButton(onClick = onStart, modifier = Modifier.size(32.dp)) {
                             Icon(
-                                painterResource(R.drawable.v_play_x24),
+                                Icons.Filled.PlayArrow,
                                 contentDescription = stringResource(R.string.download_start),
                                 modifier = Modifier.size(18.dp),
                             )
@@ -851,8 +1105,15 @@ private fun stateText(item: DownloadItemUi): String = when (item.state) {
     else -> ""
 }
 
+/**
+ * 下载标签选择面板。
+ *
+ * 原来是页面内的 `ModalNavigationDrawer`（靠外层 `LayoutDirection.Rtl` 让它从右侧出来）：
+ * `gesturesEnabled = false` 让它既不响应遮罩点击也不能滑动关闭，退出只能靠返回键或选中某个标签。
+ * 换成 bottom sheet 后，下滑 / 点遮罩 / 返回键三条路都通，也不再需要那套 RTL 镜像。
+ */
 @Composable
-private fun LabelDrawer(
+private fun LabelSheet(
     state: DownloadsUiState,
     onSelectLabel: (String?) -> Unit,
     onLongClickLabel: (String) -> Unit,
@@ -861,43 +1122,54 @@ private fun LabelDrawer(
     onSetDefaultLabel: () -> Unit,
     rowHeightPx: Float,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(bottom = 8.dp),
     ) {
-        Text(
-            text = stringResource(R.string.download_labels),
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.weight(1f),
-        )
-        IconButton(onClick = onSetDefaultLabel) {
-            Icon(
-                painterResource(R.drawable.v_download_box_dark_x24),
-                contentDescription = stringResource(R.string.default_download_label),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.download_labels),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
             )
+            IconButton(onClick = onSetDefaultLabel) {
+                Icon(
+                    Icons.Filled.Download,
+                    contentDescription = stringResource(R.string.default_download_label),
+                )
+            }
+            IconButton(onClick = onAddLabel) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.add),
+                )
+            }
         }
-        IconButton(onClick = onAddLabel) {
-            Icon(
-                painterResource(R.drawable.v_plus_dark_x24),
-                contentDescription = stringResource(R.string.add),
-            )
-        }
-    }
-    HorizontalDivider()
-    LazyColumn {
-        items(state.labels.size, key = { state.labels[it].display }) { index ->
-            val label = state.labels[index]
-            LabelRow(
-                label = label,
-                index = index,
-                count = state.labels.size,
-                rowHeightPx = rowHeightPx,
-                onClick = { onSelectLabel(label.name) },
-                onLongClick = { label.name?.let(onLongClickLabel) },
-                onMove = onMoveLabel,
-            )
+        HorizontalDivider()
+        // 标签通常只有几个，用普通 Column 让 sheet 高度跟着内容走
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing),
+        ) {
+            state.labels.forEachIndexed { index, label ->
+                LabelRow(
+                    label = label,
+                    index = index,
+                    count = state.labels.size,
+                    rowHeightPx = rowHeightPx,
+                    onClick = { onSelectLabel(label.name) },
+                    onLongClick = { label.name?.let(onLongClickLabel) },
+                    onMove = onMoveLabel,
+                )
+            }
         }
     }
 }
@@ -913,52 +1185,59 @@ private fun LabelRow(
     onMove: (Int, Int) -> Unit,
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    Row(
+    // 与对话框里的列表项同一套圆角：sheet 容器是 surfaceContainerLow，行取高一档
+    Surface(
+        shape = ListItemShape,
+        color = if (label.selected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
         modifier = Modifier
             .fillMaxWidth()
             .height(LABEL_ROW_HEIGHT)
-            .background(
-                if (label.selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-            )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Text(
-            text = "${label.display} [${label.count}]",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (label.selected) FontWeight.Bold else null,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (label.draggable) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .pointerInput(index, count, rowHeightPx) {
-                        detectDragGesturesAfterLongPress(
-                            onDrag = { change, amount ->
-                                change.consume()
-                                dragOffset += amount.y
-                            },
-                            onDragEnd = {
-                                val steps = (dragOffset / rowHeightPx).roundToInt()
-                                val target = (index + steps).coerceIn(0, count - 1)
-                                dragOffset = 0f
-                                if (target != index) onMove(index, target)
-                            },
-                            onDragCancel = { dragOffset = 0f },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_baseline_reorder_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "${label.display} [${label.count}]",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (label.selected) FontWeight.Bold else null,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (label.draggable) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .pointerInput(index, count, rowHeightPx) {
+                            detectDragGesturesAfterLongPress(
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    dragOffset += amount.y
+                                },
+                                onDragEnd = {
+                                    val steps = (dragOffset / rowHeightPx).roundToInt()
+                                    val target = (index + steps).coerceIn(0, count - 1)
+                                    dragOffset = 0f
+                                    if (target != index) onMove(index, target)
+                                },
+                                onDragCancel = { dragOffset = 0f },
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Reorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -1000,17 +1279,16 @@ private fun SingleChoiceDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            LazyColumn {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing),
+            ) {
                 items(entries.size) { index ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(onClick = { onSelect(index) }, onLongClick = {}),
-                    ) {
-                        RadioButton(selected = index == selected, onClick = { onSelect(index) })
-                        Text(text = entries[index], style = MaterialTheme.typography.bodyLarge)
-                    }
+                    DialogRadioItem(
+                        text = entries[index],
+                        selected = index == selected,
+                        onClick = { onSelect(index) },
+                    )
                 }
             }
         },

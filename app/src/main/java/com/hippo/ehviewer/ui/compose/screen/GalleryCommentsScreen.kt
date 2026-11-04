@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +40,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.FormatClear
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
@@ -47,14 +53,14 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,6 +73,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -82,6 +89,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.data.GalleryComment
+import com.hippo.ehviewer.ui.compose.component.DialogListItem
+import com.hippo.ehviewer.ui.compose.component.DialogListItemSpacing
+import com.hippo.ehviewer.ui.compose.component.EhPullToRefreshBox
+import com.hippo.ehviewer.ui.compose.component.ListItemShape
 import com.hippo.ehviewer.ui.compose.text.clearFormatting
 import com.hippo.ehviewer.ui.compose.text.toAnnotatedString
 import com.hippo.ehviewer.ui.compose.text.withLink
@@ -132,20 +143,25 @@ fun GalleryCommentsScreen(
     var voteStatus by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            LargeTopAppBar(
                 title = { Text(title) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Text("\u2190") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    }
                 },
+                scrollBehavior = scrollBehavior,
             )
         },
         floatingActionButton = {
             if (!composerVisible) {
                 FloatingActionButton(onClick = onNewComment) {
                     Icon(
-                        painter = painterResource(R.drawable.v_reply_dark_x24),
+                        imageVector = Icons.AutoMirrored.Filled.Reply,
                         contentDescription = stringResource(R.string.edit_comment),
                     )
                 }
@@ -158,7 +174,8 @@ fun GalleryCommentsScreen(
                 .padding(padding)
                 .imePadding(),
         ) {
-            PullToRefreshBox(
+            // 指示器统一成 M3E 的 LoadingIndicator（见 EhPullToRefreshBox）
+            EhPullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = onRefresh,
                 modifier = Modifier.weight(1f),
@@ -384,18 +401,14 @@ private fun CommentMenuDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing)) {
                 actions.forEach { (label, action) ->
-                    Text(
+                    DialogListItem(
                         text = label,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onDismiss()
-                                action()
-                            }
-                            .padding(vertical = 12.dp),
+                        onClick = {
+                            onDismiss()
+                            action()
+                        },
                     )
                 }
             }
@@ -424,23 +437,29 @@ private fun VoteStatusDialog(voteState: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         text = {
-            LazyColumn {
+            // 只读列表也套同一层圆角块，和可点列表的视觉重量保持一致
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(DialogListItemSpacing),
+            ) {
                 items(rows) { (user, vote) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                    ) {
-                        Text(
-                            text = user,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = vote,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Surface(shape = ListItemShape, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Text(
+                                text = user,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = vote,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -506,7 +525,7 @@ private fun CommentComposer(
                     },
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.v_clear_all_dark_x24),
+                        imageVector = Icons.Filled.FormatClear,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
@@ -547,7 +566,7 @@ private fun CommentComposer(
                         CircularProgressIndicator(Modifier.size(24.dp))
                     } else {
                         Icon(
-                            painter = painterResource(R.drawable.v_send_dark_x24),
+                            imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = stringResource(R.string.edit_comment),
                         )
                     }

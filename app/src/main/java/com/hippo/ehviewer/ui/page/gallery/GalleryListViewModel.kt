@@ -28,12 +28,14 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hippo.ehviewer.EhApplication.Companion.favouriteStatusRouter
+import com.hippo.ehviewer.EhApplication.Companion.searchDatabase
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.FavouriteStatusRouter
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhClient
 import com.hippo.ehviewer.client.EhRequest
+import com.hippo.ehviewer.client.EhTagDatabase
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.data.ListUrlBuilder
@@ -50,7 +52,8 @@ import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.compose.component.GalleryItemLayout
 import com.hippo.ehviewer.ui.compose.component.SearchCriteria
 import com.hippo.ehviewer.ui.compose.component.SearchPanelState
-import com.hippo.ehviewer.ui.compose.component.SearchPanelTab
+import com.hippo.ehviewer.ui.compose.component.SearchSuggestionType
+import com.hippo.ehviewer.ui.compose.component.SearchSuggestionUi
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_HOMEPAGE
 import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_SUBSCRIPTION
@@ -70,6 +73,8 @@ import com.hippo.util.toLocalDateTime
 import com.hippo.util.withUIContext
 import com.hippo.yorozuya.MathUtils.hammingWeight
 import kotlin.time.Clock
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -134,6 +139,11 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
         private set
     var searchPanel by mutableStateOf(SearchPanelState())
         private set
+
+    /** 搜索联想（历史 + 标签），由 [onQueryChange] 去抖刷新 */
+    var searchSuggestions by mutableStateOf(emptyList<SearchSuggestionUi>())
+        private set
+    private var suggestionJob: Job? = null
 
     /** 一次性提示 */
     var tip by mutableStateOf<String?>(null)
@@ -203,25 +213,83 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
 
     fun onQueryChange(query: String) {
         keywordQuery = query
+        scheduleSuggestions(query)
     }
 
     fun enterSimpleSearch() {
         keywordQuery = urlBuilder.keyword.orEmpty()
         uiMode = GalleryListUiMode.SIMPLE_SEARCH
+        // 刚打开搜索界面时关键词通常为空 → 直接给最近的历史，和旧 SearchBar 一致
+        scheduleSuggestions(keywordQuery)
     }
 
     fun enterSearch() {
         searchPanel = newSearchPanel()
         keywordQuery = urlBuilder.keyword.orEmpty()
         uiMode = GalleryListUiMode.SEARCH
+        scheduleSuggestions(keywordQuery)
     }
 
     fun exitSearch() {
         uiMode = GalleryListUiMode.NORMAL
+        suggestionJob?.cancel()
+        searchSuggestions = emptyList()
     }
 
-    fun setImageUri(uri: Uri?) {
-        searchPanel.imageUri = uri
+    /**
+     * 搜索词联想：搜索历史（[searchDatabase]）+ 标签库（[EhTagDatabase]），顺序与旧的
+     * `com.hippo.ehviewer.widget.SearchBar` 一致——历史在前，标签在后。
+     *
+     * 每敲一个字就整表扫一遍标签库在 10 万条量级上很贵，这里加 80ms 去抖并取消上一个 job。
+     */
+    private fun scheduleSuggestions(query: String) {
+        suggestionJob?.cancel()
+        suggestionJob = viewModelScope.launchIO {
+            delay(SUGGESTION_DEBOUNCE_MS)
+            val list = buildSuggestions(query)
+            withUIContext { searchSuggestions = list }
+        }
+    }
+
+    private suspend fun buildSuggestions(text: String): List<SearchSuggestionUi> {
+        val list = ArrayList<SearchSuggestionUi>()
+        runCatching { searchDatabase.getSuggestions(text, HISTORY_SUGGESTION_LIMIT) }
+            .getOrNull()
+            ?.forEach { list.add(SearchSuggestionUi(it, null, SearchSuggestionType.HISTORY)) }
+        // 标签只在「最后一段」上联想，且当前词没写完（带空格说明已经开始下一个词）
+        if (text.isNotEmpty() && !text.endsWith(" ") && EhTagDatabase.isInitialized()) {
+            val keyword = text.substringAfterLast(' ')
+            val translate = Settings.showTagTranslations && EhTagDatabase.isTranslatable(appContext)
+            for (type in TAG_SUGGESTION_TYPES) {
+                EhTagDatabase.suggestFlow(keyword, translate, type).collect { (hint, tag) ->
+                    list.add(SearchSuggestionUi(tag, hint, SearchSuggestionType.TAG))
+                }
+            }
+        }
+        return list.take(SUGGESTION_LIMIT)
+    }
+
+    /** 点联想：历史直接替换整句；标签补全到最后一个词的位置（带引号 + 尾随空格） */
+    fun selectSuggestion(suggestion: SearchSuggestionUi) {
+        keywordQuery = when (suggestion.type) {
+            SearchSuggestionType.HISTORY -> suggestion.keyword
+            SearchSuggestionType.TAG -> {
+                val head = keywordQuery.substringBeforeLast(' ', "")
+                val word = wrapTagKeyword(suggestion.keyword)
+                if (head.isEmpty()) word else "$head $word"
+            }
+        }
+        scheduleSuggestions(keywordQuery)
+    }
+
+    /** 历史条目长按删除 */
+    fun deleteSuggestion(suggestion: SearchSuggestionUi) {
+        if (suggestion.type != SearchSuggestionType.HISTORY) return
+        viewModelScope.launchIO {
+            runCatching { searchDatabase.deleteQuery(suggestion.keyword) }
+            val list = buildSuggestions(keywordQuery)
+            withUIContext { searchSuggestions = list }
+        }
     }
 
     /**
@@ -363,6 +431,10 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
     // region 搜索
 
     fun applySearch(query: String) {
+        // 记进搜索历史，下次联想时能出来（旧 SearchBar 也是在这里写的）
+        if (query.isNotBlank()) {
+            viewModelScope.launchIO { runCatching { searchDatabase.addQuery(query) } }
+        }
         if (uiMode == GalleryListUiMode.SEARCH) {
             when (val criteria = searchPanel.buildCriteria(query)) {
                 is SearchCriteria.Failure -> {
@@ -370,14 +442,11 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
                     return
                 }
                 is SearchCriteria.Success -> {
-                    if (criteria.mode == ListUrlBuilder.MODE_IMAGE_SEARCH) {
-                        applyImageSearch()
-                        return
-                    }
                     urlBuilder.reset()
                     urlBuilder.mode = criteria.mode
                     urlBuilder.category = criteria.category
                     urlBuilder.keyword = criteria.keyword
+                    urlBuilder.language = criteria.language
                     urlBuilder.advanceSearch = criteria.advanceSearch
                     urlBuilder.minRating = criteria.minRating
                     urlBuilder.pageFrom = criteria.pageFrom
@@ -394,9 +463,13 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
         finishSearch()
     }
 
-    /** 以图搜图：算完 SHA-1 再拼查询，算不出来就提示选图 */
-    private fun applyImageSearch() {
-        val uri = searchPanel.imageUri
+    /**
+     * 以图搜图：搜索栏右上角的图标选完图就直接搜。
+     *
+     * 面板里不再有「图片搜索」页签与预览区（对齐参考实现：筛选面板只放筛条件），
+     * 所以选图这一步由搜索栏发起，算完 SHA-1 立刻刷新列表。
+     */
+    fun searchByImage(uri: Uri?) {
         if (uri == null) {
             showTip(appContext.getString(R.string.select_image_first))
             return
@@ -579,21 +652,18 @@ class GalleryListViewModel(private val appContext: Context) : ViewModel() {
 
     private fun newSearchPanel(): SearchPanelState {
         val mode = urlBuilder.mode
-        val isImageSearch = mode == ListUrlBuilder.MODE_IMAGE_SEARCH
         return SearchPanelState(
-            tab = if (isImageSearch) SearchPanelTab.IMAGE else SearchPanelTab.NORMAL,
-            searchMode = if (isImageSearch || mode == MODE_WHATS_HOT || mode == MODE_TOPLIST) {
+            searchMode = if (mode == ListUrlBuilder.MODE_IMAGE_SEARCH || mode == MODE_WHATS_HOT || mode == MODE_TOPLIST) {
                 ListUrlBuilder.MODE_NORMAL
             } else {
                 mode
             },
             category = urlBuilder.category,
-            advanceEnabled = urlBuilder.advanceSearch != -1,
+            language = urlBuilder.language,
             advanceSearch = urlBuilder.advanceSearch.coerceAtLeast(0),
             minRating = urlBuilder.minRating,
             pageFrom = urlBuilder.pageFrom.takeIf { it != -1 }?.toString().orEmpty(),
             pageTo = urlBuilder.pageTo.takeIf { it != -1 }?.toString().orEmpty(),
-            imageUri = null,
         )
     }
 
@@ -713,3 +783,14 @@ private fun navCheckedItemFor(mode: Int): Int = when (mode) {
     MODE_TOPLIST -> R.id.nav_toplist
     else -> 0
 }
+
+private const val SUGGESTION_DEBOUNCE_MS = 80L
+private const val HISTORY_SUGGESTION_LIMIT = 32
+private const val SUGGESTION_LIMIT = 64
+
+/** 标签联想的匹配档位：完全相等 → 前缀 → 包含，和旧 SearchBar 的遍历顺序一致 */
+private val TAG_SUGGESTION_TYPES = intArrayOf(
+    EhTagDatabase.TYPE_EQUAL,
+    EhTagDatabase.TYPE_START,
+    EhTagDatabase.TYPE_CONTAIN,
+)

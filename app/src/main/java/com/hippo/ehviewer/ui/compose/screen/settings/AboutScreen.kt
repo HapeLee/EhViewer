@@ -17,25 +17,14 @@
  */
 package com.hippo.ehviewer.ui.compose.screen.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
@@ -56,8 +45,10 @@ private const val URL_SOURCE = "https://github.com/EhViewer-NekoInverter/EhViewe
  *
  * 作者那一段原本是 HTML（`<del>` 标已卸任的作者），这里仍交给
  * [AnnotatedString.fromHtml] 解析，而不是先剥标签再显示纯文本。
+ *
+ * 摘要是 `AnnotatedString`（作者那段带富文本），所以没有直接复用 [PreferenceRow]，
+ * 只把整组塞进 [SettingsGroup] 里，保证圆角分组与别的设置页一致。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
     onBack: () -> Unit,
@@ -69,27 +60,8 @@ fun AboutScreen(
     val versionSummary = "${BuildConfig.VERSION_NAME} (${BuildConfig.COMMIT_SHA})\n" +
         stringResource(R.string.settings_about_build_time, BuildConfig.BUILD_TIME)
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_about)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.v_arrow_left_dark_x24),
-                            contentDescription = null,
-                        )
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
-        ) {
+    SettingsScaffold(titleRes = R.string.settings_about, onBack = onBack) {
+        SettingsGroup {
             AboutRow(
                 title = stringResource(R.string.settings_about_declaration),
                 summary = AnnotatedString(stringResource(R.string.settings_about_declaration_summary)),
@@ -116,7 +88,6 @@ fun AboutScreen(
             AboutRow(
                 title = stringResource(R.string.settings_about_version),
                 summary = AnnotatedString(versionSummary),
-                showDivider = false,
             )
         }
     }
@@ -127,29 +98,22 @@ private fun AboutRow(
     title: String,
     summary: AnnotatedString,
     onOpenUrl: ((String) -> Unit)? = null,
-    showDivider: Boolean = true,
 ) {
-    val modifier = if (onOpenUrl != null) {
-        Modifier.clickable { onOpenUrl(summary.text) }
-    } else {
-        Modifier
-    }
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    if (showDivider) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    SettingsItem(onClick = onOpenUrl?.let { open -> { open(summary.text) } }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

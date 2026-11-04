@@ -18,17 +18,14 @@ package com.hippo.ehviewer.ui.page.favorites
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.view.GravityCompat
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.material.datepicker.CalendarConstraints
-import com.google.android.material.datepicker.CompositeDateValidator
-import com.google.android.material.datepicker.DateValidatorPointBackward
-import com.google.android.material.datepicker.DateValidatorPointForward
-import com.google.android.material.datepicker.MaterialDatePicker
-import com.hippo.ehviewer.R
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.compose.component.GoToDateDialog
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.screen.FavoritesScreen
@@ -47,13 +44,13 @@ import com.hippo.ehviewer.ui.host.ehHostOrNoOp
  * - `getString` / `context` 换成 `appContext`（ViewModel 里）
  * - 「列表非空时用 Snackbar 提示」改成一次性 `tip` 状态，由这里消费
  *
- * 日期选择器仍用 `MaterialDatePicker`（走宿主 Activity 的 `supportFragmentManager`），
- * 避免在出壳这一片里同时换掉交互形态。
+ * 日期选择器已经从 MDC 的 `MaterialDatePicker`（View 体系的 DialogFragment，只能吃
+ * XML 主题的静态色）换成 Compose 的 `GoToDateDialog`，开关状态也收回这一层。
  */
 @Composable
 fun FavoritesScene() {
     val context = LocalContext.current
-    val activity = context as? FragmentActivity
+    val activity = context as? MainActivity
     val host = ehHostOrNoOp()
     val navigator = ehNavigator()
     val vm = viewModel { FavoritesViewModel(context.applicationContext) }
@@ -75,28 +72,8 @@ fun FavoritesScene() {
         }
     }
 
-    fun showGoToDialog() {
-        val range = vm.goToDateRange()
-        val constraints = CalendarConstraints.Builder()
-            .setStart(range.first)
-            .setEnd(range.last)
-            .setValidator(
-                CompositeDateValidator.allOf(
-                    listOf(
-                        DateValidatorPointForward.from(range.first),
-                        DateValidatorPointBackward.before(range.last),
-                    ),
-                ),
-            )
-            .build()
-        val datePicker = MaterialDatePicker.Builder.datePicker()
-            .setCalendarConstraints(constraints)
-            .setTitleText(R.string.go_to)
-            .setSelection(vm.goToDateDefault())
-            .build()
-        datePicker.addOnPositiveButtonClickListener { millis -> vm.goToDate(millis) }
-        datePicker.show(activity?.supportFragmentManager ?: return, "date-picker")
-    }
+    // 日期选择器是 Compose 对话框，开关状态由这一层持有
+    var showGoToDate by remember { mutableStateOf(false) }
 
     FavoritesScreen(
         title = vm.title,
@@ -112,14 +89,14 @@ fun FavoritesScene() {
         categories = vm.categories,
         currentFavCat = vm.currentFavCat,
         selection = vm.selection,
-        onOpenNavDrawer = { host.toggleDrawer(GravityCompat.START) },
+        onOpenNavDrawer = { host.toggleLeftDrawer() },
         onRefresh = vm::refresh,
         onLoadMore = vm::loadMore,
         onOpenDetail = { gi -> navigator.push(EhRoute.GalleryDetail(gid = gi.gid, token = gi.token)) },
         onToggleSelect = vm::toggleSelect,
         onSelectAll = vm::selectAll,
         onClearSelection = vm::clearSelection,
-        onDownloadSelected = { vm.downloadSelected(activity as? MainActivity) },
+        onDownloadSelected = { vm.downloadSelected(activity) },
         onDeleteSelected = vm::deleteSelected,
         onMoveSelected = vm::moveSelected,
         onEnterSearch = vm::enterSearch,
@@ -127,7 +104,19 @@ fun FavoritesScene() {
         onApplySearch = vm::applySearch,
         onSelectCategory = vm::selectCategory,
         onSetDefaultSlot = vm::setDefaultSlot,
-        onGoToDate = ::showGoToDialog,
+        onGoToDate = { showGoToDate = true },
         onGoToLastPage = vm::goToLastPage,
     )
+
+    if (showGoToDate) {
+        GoToDateDialog(
+            range = vm.goToDateRange(),
+            initialDateMillis = vm.goToDateDefault(),
+            onDismiss = { showGoToDate = false },
+            onConfirm = { millis ->
+                showGoToDate = false
+                vm.goToDate(millis)
+            },
+        )
+    }
 }

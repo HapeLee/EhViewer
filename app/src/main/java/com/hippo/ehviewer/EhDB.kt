@@ -187,6 +187,21 @@ object EhDB {
     val historyLazyList: PagingSource<Int, HistoryInfo>
         get() = db.historyDao().listLazy()
 
+    /** 带关键字的版本：标题 / 原名 / 作者模糊匹配，同样惰性执行 */
+    fun searchHistory(query: String): PagingSource<Int, HistoryInfo> = db.historyDao().searchLazy(query)
+
+    /**
+     * 画廊标题：只从历史里取。
+     *
+     * 阅读器的入口 route 只有 gid/token（见 `EhRoute.Reader`），而页源那头也拿不到标题
+     * （`SpiderInfo` 没有 title 字段）。历史表是唯一「按 gid 就能查到标题」的地方，
+     * 查不到就返回 null，顶栏退回页码显示——这只是装饰，不值得为它多发一次请求。
+     */
+    fun getGalleryTitle(gid: Long): String? {
+        if (gid == -1L) return null
+        return db.historyDao().load(gid)?.title?.takeIf { it.isNotBlank() }
+    }
+
     /**
      * 读到第几页（0 基）；没有记录时返回 null。
      *

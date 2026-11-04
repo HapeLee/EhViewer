@@ -19,9 +19,11 @@ package com.hippo.util
 
 import android.text.Html
 import android.text.Spanned
-import com.hippo.text.URLImageGetter
-import com.hippo.widget.ObservedTextView
 
+/**
+ * HTML → [Spanned]。
+ *
+ * 只保留纯文本转换：带 `ImageGetter` 的那个重载（把 `<img>` 塞进 `ObservedTextView`）
+ * 随着老公告视图一起删了，图片一律走 Coil。
+ */
 fun loadHtml(source: String): Spanned = Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY)
-
-fun loadHtml(source: String?, textView: ObservedTextView): Spanned = Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY, URLImageGetter(textView), null)

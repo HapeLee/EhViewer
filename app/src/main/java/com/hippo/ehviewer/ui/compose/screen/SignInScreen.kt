@@ -37,6 +37,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,7 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -66,6 +72,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.hippo.ehviewer.R
 
 /**
@@ -112,6 +120,15 @@ fun SignInScreen(
 ) {
     val focusManager = LocalFocusManager.current
     var passwordVisible by remember { mutableStateOf(false) }
+    // R.mipmap.ic_launcher 在 API 26+ 是 <adaptive-icon>，painterResource 只认 vector / 位图，
+    // 直接传会抛 IllegalArgumentException，所以先栅格化成 BitmapPainter
+    val context = LocalContext.current
+    val logoPainter = remember(context) {
+        ContextCompat.getDrawable(context, R.mipmap.ic_launcher)?.let { drawable ->
+            val size = drawable.intrinsicWidth.takeIf { it > 0 } ?: 144
+            BitmapPainter(drawable.toBitmap(size, size).asImageBitmap())
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -131,13 +148,15 @@ fun SignInScreen(
                     .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Image(
-                    painter = painterResource(R.mipmap.ic_launcher),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .size(96.dp),
-                )
+                logoPainter?.let { painter ->
+                    Image(
+                        painter = painter,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .size(96.dp),
+                    )
+                }
                 OutlinedTextField(
                     value = username,
                     onValueChange = onUsernameChange,
@@ -172,22 +191,23 @@ fun SignInScreen(
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
                             Icon(
-                                painter = painterResource(
-                                    if (passwordVisible) {
-                                        R.drawable.v_visibility_off_dark_x24
-                                    } else {
-                                        R.drawable.v_visibility_dark_x24
-                                    },
-                                ),
+                                imageVector = if (passwordVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
                                 contentDescription = stringResource(R.string.password),
                             )
                         }
                     },
                 )
                 ErrorText(passwordError)
+                // 这一页没有 Scaffold / Surface 铺底，虽然 `EhTheme` 已经把 LocalContentColor
+                // 兜到 onBackground，这里仍显式写出「窗口正文色」，避免将来主题层再变时又退回黑色
                 Text(
                     text = stringResource(R.string.app_waring),
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 24.dp),

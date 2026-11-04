@@ -14,88 +14,22 @@
   ~ limitations under the License.
   -->
 
+<!--
+  ~ 剩下的都是「不随主题走」的字面量：启动器快捷方式图标、默认头像、评分星、Cookie 图标。
+  ~ 旧的 `colorPrimary` / `colorAccent` / `content` / `widget` / `divider` / `progress`
+  ~ 那一整套（外加 `values-night` 的深色副本）是给 XML 主题和旧 View 用的，消费方已经
+  ~ 全部删掉，主题色一律来自 Compose 的 `ColorScheme`。
+  -->
 <resources>
-
-    <!-- primary_drawable     54% -->
-    <!-- secondary_drawable   26% -->
-    <!-- secondary_drawable_dark    30% -->
-    <!-- primary_drawable_black     80% -->
-    <!-- secondary_drawable_black   24% -->
-    <color name="primary_drawable">#8a000000</color>
-    <color name="secondary_drawable">#42000000</color>
-    <color name="primary_drawable_black">#ccffffff</color>
-    <color name="secondary_drawable_black">#3dffffff</color>
-
-    <color name="primary_text_default_material_black">#d9ffffff</color>
-    <color name="primary_text_disabled_material_black">#4dffffff</color>
-
-    <color name="content">#fff</color>
-    <color name="content_black">@color/grey_925</color>
-
-    <color name="content_activated">@color/grey_300</color>
-    <color name="content_activated_black">@color/grey_700</color>
-
-    <color name="widget">@color/grey_200</color>
-    <color name="widget_black">@color/grey_850</color>
-
-    <color name="progress">@color/colorAccent</color>
-    <color name="progress_black">@color/grey_700</color>
-
-    <color name="tag_group_background">@color/colorAccent</color>
-    <color name="tag_group_background_black">@color/grey_875</color>
-
-    <color name="tag_background">@color/colorPrimary</color>
-    <color name="tag_background_black">@color/grey_875</color>
-
-    <color name="gallery_detail_button_background">@color/colorBackground</color>
-    <color name="gallery_detail_button_background_black">@color/grey_875</color>
-
-    <color name="red_500">#fff44336</color>
-    <color name="teal_500">#ff009688</color>
-    <color name="teal_700">#ff00796b</color>
-    <color name="purple_a200">#ffe040fb</color>
-    <color name="purple_a700">#ffaa00ff</color>
-    <color name="cyan_600">#ff00acc1</color>
-    <color name="light_green_600">#ff7cb342</color>
-    <color name="yellow_800">#fff9a825</color>
-    <color name="deep_orange_400">#ffff7043</color>
-    <color name="grey_925">#ff191919</color>
-    <color name="grey_875">#ff292929</color>
-    <color name="grey_850">#ff323232</color>
-    <color name="grey_825">#ff3a3a3a</color>
-    <color name="grey_775">#ff4a4a4a</color>
-    <color name="grey_700">#ff616161</color>
-    <color name="grey_600">#ff757575</color>
-    <color name="grey_300">#ffe0e0e0</color>
-    <color name="grey_200">#ffeeeeee</color>
-    <color name="brown_500">#ff795548</color>
-
-    <color name="colorPrimary">@color/teal_500</color>
-    <color name="colorPrimaryDark">@color/teal_700</color>
-    <color name="colorAccent">@color/purple_a200</color>
-
-    <color name="loading_indicator_red">#ffe53935</color>
-    <color name="loading_indicator_purple">@color/purple_a700</color>
-    <color name="loading_indicator_blue">#ff1d87e4</color>
-    <color name="loading_indicator_cyan">@color/cyan_600</color>
-    <color name="loading_indicator_green">@color/light_green_600</color>
-    <color name="loading_indicator_yellow">@color/yellow_800</color>
-    <color name="loading_indicator_orange">@color/deep_orange_400</color>
-
-    <!-- divider -->
-    <color name="divider">#20000000</color>
-
-    <color name="divider_black">#20ffffff</color>
-    <!-- shadow -->
-
-    <color name="guide_bg">#e5009688</color>
-
-    <!-- Lock pattern view -->
-    <color name="lock_pattern_view_regular_color">#8a000000</color>
-    <color name="lock_pattern_view_success_color">@color/colorPrimary</color>
-    <color name="lock_pattern_view_error_color">@color/red_500</color>
 
     <!--Shortcut background-->
     <color name="shortcut_bg">#F5F5F5</color>
-    <color name="colorBackground">#fff</color>
+
+    <!-- 冷启动那一帧的窗口底色；进入 Composition 之后由 EhNavHostActivity 按色板重铺 -->
+    <color name="window_background">#FFFFFFFF</color>
+
+    <color name="teal_500">#ff009688</color>
+    <color name="yellow_800">#fff9a825</color>
+    <color name="brown_500">#ff795548</color>
+
 </resources>

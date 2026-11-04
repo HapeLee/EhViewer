@@ -41,6 +41,15 @@ interface HistoryDao : BasicDao<HistoryInfo> {
     @Query("SELECT * FROM HISTORY ORDER BY TIME DESC")
     fun listLazy(): PagingSource<Int, HistoryInfo>
 
+    /** 标题 / 原名 / 作者任一命中；`LIKE` 的 `%` 拼接放在 SQL 里，调用方不用管转义 */
+    @Query(
+        "SELECT * FROM HISTORY WHERE TITLE LIKE '%' || :query || '%'" +
+            " OR TITLE_JPN LIKE '%' || :query || '%'" +
+            " OR UPLOADER LIKE '%' || :query || '%'" +
+            " ORDER BY TIME DESC",
+    )
+    fun searchLazy(query: String): PagingSource<Int, HistoryInfo>
+
     @Update
     fun update(historyInfo: HistoryInfo)
 

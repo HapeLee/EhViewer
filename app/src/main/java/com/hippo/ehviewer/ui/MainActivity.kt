@@ -1,23 +1,23 @@
 /*
  * Copyright 2016 Hippo Seven
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This file is part of EhViewer
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * EhViewer is free software: you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * EhViewer is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with EhViewer.
+ * If not, see <https://www.gnu.org/licenses/>.
  */
 package com.hippo.ehviewer.ui
 
-import android.annotation.SuppressLint
 import android.app.UiModeManager
-import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.verify.domain.DomainVerificationManager
@@ -26,29 +26,25 @@ import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
-import android.os.PersistableBundle
-import android.text.TextUtils
-import android.view.MenuItem
-import android.view.View
-import android.widget.TextView
-import android.widget.Toast
 import androidx.annotation.IdRes
 import androidx.annotation.StringRes
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.coordinatorlayout.widget.CoordinatorLayout
+import androidx.compose.material3.DrawerState
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
-import androidx.core.view.GravityCompat
-import androidx.core.view.isVisible
-import androidx.drawerlayout.widget.DrawerLayout
-import com.google.android.material.navigation.NavigationView
-import com.google.android.material.snackbar.Snackbar
-import com.hippo.app.EditTextDialogBuilder
+import androidx.lifecycle.lifecycleScope
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhUrlOpener
-import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.ListUrlBuilder
 import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
@@ -58,15 +54,18 @@ import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_SUBSCRIPTION
 import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_TOP_LIST
 import com.hippo.ehviewer.ui.compose.nav.LIST_ACTION_WHATS_HOT
 import com.hippo.ehviewer.ui.compose.nav.ReaderSource
-import com.hippo.ehviewer.ui.compose.nav.cachedGalleryDetail
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
 import com.hippo.ehviewer.ui.compose.nav.homepageRoute
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
 import com.hippo.ehviewer.ui.compose.nav.isSolidRoute
 import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
+import com.hippo.ehviewer.ui.host.DialogHost
+import com.hippo.ehviewer.ui.host.DialogRequest
 import com.hippo.ehviewer.ui.host.EhHost
 import com.hippo.ehviewer.ui.host.EhNavHostActivity
+import com.hippo.ehviewer.ui.host.HostShell
+import com.hippo.ehviewer.ui.host.MainShell
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_LONG
 import com.hippo.unifile.UniFile
 import com.hippo.unifile.sha1
@@ -74,21 +73,32 @@ import com.hippo.util.addTextToClipboard
 import com.hippo.util.getClipboardManager
 import com.hippo.util.getParcelableExtraCompat
 import com.hippo.util.getUrlFromClipboard
-import com.hippo.widget.LoadImageView
 import com.hippo.yorozuya.SimpleHandler
-import com.hippo.yorozuya.ViewUtils
+import kotlinx.coroutines.launch
 
-class MainActivity :
-    EhNavHostActivity(),
-    EhHost,
-    NavigationView.OnNavigationItemSelectedListener {
+/**
+ * 主界面：抽屉 / Snackbar 已经全部是 Compose（[MainShell]），这里只剩「宿主职责」——
+ * 冷启动路由、外部 Intent 解析、下载目录 / 计量网络 / App Link 三项自检，
+ * 以及给页面用的 [EhHost] 壳能力实现。
+ *
+ * 壳状态全部是 Compose 状态：`drawerState` / `drawerEnabled` / `checkedNavId` /
+ * `profileVersion`，[shell] 把它们交给 [MainShell]；页面通过 `LocalEhHost`
+ * 间接改这些值，不再有 `DrawerLayout` / `NavigationView` 这些 View 引用。
+ */
+class MainActivity : EhNavHostActivity(), EhHost {
     private lateinit var connectivityManager: ConnectivityManager
-    private var mSnackBar: CoordinatorLayout? = null
-    private var mDrawerLayout: DrawerLayout? = null
-    private var mNavView: NavigationView? = null
-    private var mAvatar: LoadImageView? = null
-    private var mDisplayName: TextView? = null
-    private var mNavCheckedItem = 0
+
+    // 壳状态：交给 MainShell，页面通过 EhHost 改
+    private val snackbarHostState = SnackbarHostState()
+    private val drawerState = DrawerState(DrawerValue.Closed)
+    private var drawerEnabled by mutableStateOf(true)
+    private var checkedNavId by mutableIntStateOf(0)
+
+    /** 只是「重读 Settings 里的头像 / 昵称」的触发器 */
+    private var profileVersion by mutableIntStateOf(0)
+
+    /** 工具层投递的对话框请求，由 [MainShell] 旁边的 [DialogHost] 渲染 */
+    private var dialogRequest by mutableStateOf<DialogRequest?>(null)
 
     /**
      * 冷启动的第一跳。
@@ -97,6 +107,41 @@ class MainActivity :
      * 没有守卫时就是首页列表。
      */
     override fun initialRoute(): EhRoute = initialCheckRoute()
+
+    override fun shell(): HostShell = { content ->
+        MainShell(
+            drawerState = drawerState,
+            drawerEnabled = drawerEnabled,
+            checkedNavId = checkedNavId,
+            profileVersion = profileVersion,
+            snackbarHostState = snackbarHostState,
+            onNavSelect = ::onNavSelect,
+            onToggleNightMode = ::toggleNightMode,
+            onProfileClick = ::updateProfile,
+            content = content,
+        )
+        // 工具层（CommonOperations 等）投递来的对话框，见 DialogRequest
+        dialogRequest?.let { request ->
+            DialogHost(request = request, onDismiss = { dialogRequest = null })
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        connectivityManager = getSystemService()!!
+        if (savedInstanceState == null) {
+            checkDownloadLocation()
+            if (Settings.meteredNetworkWarning) {
+                checkMeteredNetwork()
+            }
+            if (!Settings.appLinkVerifyTip) {
+                try {
+                    checkAppLinkVerify()
+                } catch (_: PackageManager.NameNotFoundException) {
+                }
+            }
+        }
+    }
 
     private fun handleIntent(intent: Intent?): Boolean {
         intent ?: return false
@@ -149,15 +194,21 @@ class MainActivity :
                 handleUrl = true
                 if (intent.data != null) {
                     val url = intent.data.toString()
-                    EditTextDialogBuilder(this, url, "")
-                        .setTitle(R.string.error_cannot_parse_the_url)
-                        .setPositiveButton(android.R.string.copy) { _: DialogInterface?, _: Int ->
-                            this.addTextToClipboard(
-                                url,
-                                false,
-                            )
-                        }
-                        .show()
+                    showDialog(
+                        DialogRequest.TextInput(
+                            title = getString(R.string.error_cannot_parse_the_url),
+                            hint = null,
+                            initialText = url,
+                            positiveText = getString(android.R.string.copy),
+                            onConfirm = { text, _ ->
+                                this.addTextToClipboard(
+                                    text,
+                                    false,
+                                )
+                            },
+                            onCancel = {},
+                        ),
+                    )
                 }
             }
             if (0 == sceneCount) {
@@ -172,52 +223,6 @@ class MainActivity :
 
     /** 下载通知等外部入口：旧参数还原成 route，守卫链由宿主统一跑 */
     override fun onStartSceneFromIntent(sceneName: String, args: Bundle?): EhRoute? = legacyRouteOf(sceneName, args) ?: homepageRoute()
-
-    override fun setupContent(savedInstanceState: Bundle?) {
-        connectivityManager = getSystemService()!!
-        setContentView(R.layout.activity_main)
-        mSnackBar = ViewUtils.`$$`(this, R.id.snackbar) as CoordinatorLayout
-        mDrawerLayout = ViewUtils.`$$`(this, R.id.draw_view) as DrawerLayout
-        mNavView = ViewUtils.`$$`(this, R.id.nav_view) as NavigationView
-        if (mDrawerLayout != null) {
-            mDrawerLayout!!.setStatusBarBackgroundColor(0)
-        }
-        if (mNavView != null) {
-            val headerLayout = mNavView!!.getHeaderView(0)
-            mAvatar = ViewUtils.`$$`(headerLayout, R.id.avatar) as LoadImageView
-            mDisplayName = ViewUtils.`$$`(headerLayout, R.id.display_name) as TextView
-            ViewUtils.`$$`(headerLayout, R.id.night_mode).setOnClickListener {
-                val theme = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_YES <= 0
-                val target = if (((getSystemService(UI_MODE_SERVICE) as UiModeManager).nightMode == UiModeManager.MODE_NIGHT_YES) == theme) {
-                    AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                } else if (theme) {
-                    AppCompatDelegate.MODE_NIGHT_YES
-                } else {
-                    AppCompatDelegate.MODE_NIGHT_NO
-                }
-                AppCompatDelegate.setDefaultNightMode(target)
-                Settings.putTheme(target)
-                recreate()
-            }
-            updateProfile()
-            mNavView!!.setNavigationItemSelectedListener(this)
-            mAvatar!!.setOnClickListener { updateProfile() }
-        }
-        if (savedInstanceState == null) {
-            checkDownloadLocation()
-            if (Settings.meteredNetworkWarning) {
-                checkMeteredNetwork()
-            }
-            if (!Settings.appLinkVerifyTip) {
-                try {
-                    checkAppLinkVerify()
-                } catch (_: PackageManager.NameNotFoundException) {
-                }
-            }
-        } else {
-            onRestore(savedInstanceState)
-        }
-    }
 
     @Throws(PackageManager.NameNotFoundException::class)
     private fun checkAppLinkVerify() {
@@ -234,31 +239,39 @@ class MainActivity :
             break
         }
         if (hasUnverified) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.app_link_not_verified_title)
-                .setMessage(R.string.app_link_not_verified_message)
-                .setPositiveButton(R.string.open_settings) { _: DialogInterface?, _: Int ->
-                    try {
-                        val intent = Intent(
-                            android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
-                            "package:$packageName".toUri(),
+            // 三元对话框（打开设置 / 取消 / 不再显示）：M3 的 AlertDialog 只有两个槽位，
+            // 所以走宿主对话框，见 DialogRequest.Message.neutralText
+            showDialog(
+                DialogRequest.Message(
+                    title = getString(R.string.app_link_not_verified_title),
+                    message = getString(R.string.app_link_not_verified_message),
+                    positiveText = getString(R.string.open_settings),
+                    negativeText = getString(android.R.string.cancel),
+                    neutralText = getString(R.string.dont_show_again),
+                    onPositive = ::openAppLinkSettings,
+                    onNeutral = {
+                        Settings.putAppLinkVerifyTip(
+                            true,
                         )
-                        startActivity(intent)
-                    } catch (_: Throwable) {
-                        val intent = Intent(
-                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            "package:$packageName".toUri(),
-                        )
-                        startActivity(intent)
-                    }
-                }
-                .setNegativeButton(android.R.string.cancel, null)
-                .setNeutralButton(R.string.dont_show_again) { _: DialogInterface?, _: Int ->
-                    Settings.putAppLinkVerifyTip(
-                        true,
-                    )
-                }
-                .show()
+                    },
+                ),
+            )
+        }
+    }
+
+    private fun openAppLinkSettings() {
+        try {
+            val intent = Intent(
+                android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                "package:$packageName".toUri(),
+            )
+            startActivity(intent)
+        } catch (_: Throwable) {
+            val intent = Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                "package:$packageName".toUri(),
+            )
+            startActivity(intent)
         }
     }
 
@@ -268,55 +281,33 @@ class MainActivity :
         if (null == uniFile || uniFile.ensureDir()) {
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.waring)
-            .setMessage(R.string.invalid_download_location)
-            .setPositiveButton(R.string.get_it, null)
-            .show()
+        showDialog(
+            DialogRequest.Message(
+                title = getString(R.string.waring),
+                message = getString(R.string.invalid_download_location),
+                positiveText = getString(R.string.get_it),
+                onPositive = {},
+            ),
+        )
     }
 
     private fun checkMeteredNetwork() {
         if (connectivityManager.isActiveNetworkMetered) {
-            if (mSnackBar != null) {
-                Snackbar.make(
-                    mSnackBar!!,
-                    R.string.metered_network_warning,
-                    Snackbar.LENGTH_LONG,
+            lifecycleScope.launch {
+                val result = snackbarHostState.showSnackbar(
+                    message = getString(R.string.metered_network_warning),
+                    actionLabel = getString(R.string.settings),
+                    duration = SnackbarDuration.Long,
                 )
-                    .setAction(R.string.settings) {
-                        val panelIntent =
-                            Intent(android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
-                        startActivity(panelIntent)
-                    }
-                    .show()
-            } else {
-                showTip(R.string.metered_network_warning, TIP_LENGTH_LONG)
+                if (result == SnackbarResult.ActionPerformed) {
+                    startActivity(Intent(android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY))
+                }
             }
         }
     }
 
-    private fun onRestore(savedInstanceState: Bundle) {
-        mNavCheckedItem = savedInstanceState.getInt(KEY_NAV_CHECKED_ITEM)
-    }
-
-    // 注意：不能用带 PersistableBundle 的重载——它只在 manifest 里声明了
-    // `persistableMode="persistAcrossReboots"` 时才会被调用，否则抽屉选中项永远存不下来
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putInt(KEY_NAV_CHECKED_ITEM, mNavCheckedItem)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        mDrawerLayout = null
-        mNavView = null
-        mAvatar = null
-        mDisplayName = null
-    }
-
     override fun onResume() {
         super.onResume()
-        setNavCheckedItem(mNavCheckedItem)
         checkClipboardUrl()
     }
 
@@ -358,152 +349,120 @@ class MainActivity :
         val hashCode = text?.hashCode() ?: 0
         if (text != null && hashCode != 0 && Settings.clipboardTextHashCode != hashCode) {
             val route = createRouteFromClipboardUrl(text)
-            if (route != null && mSnackBar != null) {
-                val snackbar = Snackbar.make(
-                    mSnackBar!!,
-                    R.string.clipboard_gallery_url_snack_message,
-                    Snackbar.LENGTH_SHORT,
-                )
-                snackbar.setAction(R.string.clipboard_gallery_url_snack_action) {
-                    ehNavigator().push(route)
+            if (route != null) {
+                lifecycleScope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = getString(R.string.clipboard_gallery_url_snack_message),
+                        actionLabel = getString(R.string.clipboard_gallery_url_snack_action),
+                        duration = SnackbarDuration.Short,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        ehNavigator().push(route)
+                    }
                 }
-                snackbar.show()
             }
         }
         Settings.putClipboardTextHashCode(hashCode)
     }
 
+    /** 头像 / 昵称来自 `Settings`（不是 Compose 状态），改版本号让抽屉头重读一次 */
     override fun updateProfile() {
-        if (mAvatar == null || mDisplayName == null) {
-            return
-        }
-        val avatarUrl = Settings.avatar
-        if (TextUtils.isEmpty(avatarUrl)) {
-            mAvatar!!.load(R.drawable.default_avatar)
-        } else {
-            mAvatar!!.load(avatarUrl!!, avatarUrl)
-        }
-        val displayName = Settings.displayName
-        if (TextUtils.isEmpty(displayName)) {
-            mDisplayName!!.text = getString(R.string.default_display_name)
-        } else {
-            mDisplayName!!.text = displayName
+        profileVersion++
+    }
+
+    override fun setLeftDrawerEnabled(enabled: Boolean) {
+        drawerEnabled = enabled
+        if (!enabled && drawerState.isOpen) {
+            closeLeftDrawer()
         }
     }
 
-    // TODO(P7-d) Compose 页面自己管 FAB 等浮层，宿主的 aboveSnack 机制随之删除
-    override fun addAboveSnackView(view: View) = Unit
-
-    override fun removeAboveSnackView(view: View) = Unit
-
-    override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
-        mDrawerLayout?.setDrawerLockMode(lockMode, edgeGravity)
+    /**
+     * 抽屉开合要跑在带 `MonotonicFrameClock` 的上下文里：`DrawerState.animateTo` 用
+     * `withFrameNanos` 驱动动画，裸的 `Dispatchers.Main`（lifecycleScope 默认）会抛
+     * 「A MonotonicFrameClock is not available in this CoroutineContext」。
+     */
+    private fun launchOnCompose(block: suspend () -> Unit) {
+        lifecycleScope.launch(AndroidUiDispatcher.Main) { block() }
     }
 
-    override fun openDrawer(drawerGravity: Int) {
-        mDrawerLayout?.openDrawer(drawerGravity)
-    }
+    override fun openLeftDrawer() = launchOnCompose { drawerState.open() }
 
-    override fun closeDrawer(drawerGravity: Int) {
-        mDrawerLayout?.closeDrawer(drawerGravity)
-    }
+    override fun closeLeftDrawer() = launchOnCompose { drawerState.close() }
 
-    override fun toggleDrawer(drawerGravity: Int) {
-        mDrawerLayout?.run {
-            if (isDrawerOpen(drawerGravity)) {
-                closeDrawer(drawerGravity)
-            } else {
-                openDrawer(drawerGravity)
-            }
-        }
+    override fun toggleLeftDrawer() {
+        if (drawerState.isOpen) closeLeftDrawer() else openLeftDrawer()
     }
 
     override fun setNavCheckedItem(@IdRes resId: Int) {
-        mNavCheckedItem = resId
-        mNavView?.run {
-            if (resId == 0) {
-                setCheckedItem(R.id.nav_stub)
-            } else {
-                setCheckedItem(resId)
-            }
-        }
+        checkedNavId = resId
     }
 
     override fun showTip(@StringRes id: Int, length: Int) {
         showTip(getString(id), length)
     }
 
-    private val isDrawerOpen
-        get() = mNavView?.isVisible == true
+    override fun showDialog(request: DialogRequest) {
+        dialogRequest = request
+    }
 
     /**
-     * If activity is running, show snack bar, otherwise show toast
+     * 抽屉开着的时候发 Toast：Snackbar 会被抽屉遮住，与旧实现同一取舍。
      */
     override fun showTip(message: CharSequence, length: Int) {
-        if (mSnackBar != null && !isDrawerOpen) {
-            Snackbar.make(
-                mSnackBar!!,
-                message,
-                if (length == TIP_LENGTH_LONG) Snackbar.LENGTH_LONG else Snackbar.LENGTH_SHORT,
-            ).show()
-        } else {
-            Toast.makeText(
+        if (drawerState.isOpen) {
+            android.widget.Toast.makeText(
                 this,
                 message,
-                if (length == TIP_LENGTH_LONG) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
+                if (length == TIP_LENGTH_LONG) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT,
             ).show()
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (isDrawerOpen) {
-            mDrawerLayout!!.closeDrawers()
         } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
+            lifecycleScope.launch {
+                snackbarHostState.showSnackbar(
+                    message = message.toString(),
+                    duration = if (length == TIP_LENGTH_LONG) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+            }
         }
     }
 
-    override fun onNavigationItemSelected(item: MenuItem): Boolean {
+    /** 抽屉开着时返回键先关抽屉（原 `onBackPressed` 的分支） */
+    override fun onInterceptBack(): Boolean {
+        if (drawerState.isOpen) {
+            closeLeftDrawer()
+            return true
+        }
+        return false
+    }
+
+    private fun onNavSelect(@IdRes id: Int) {
         // Don't select twice
-        if (item.isChecked) {
-            return false
-        }
-        val id = item.itemId
+        if (id == checkedNavId) return
         when (id) {
-            R.id.nav_homepage -> {
-                navController.pushAsRoot(homepageRoute(LIST_ACTION_HOMEPAGE))
-            }
-            R.id.nav_subscription -> {
-                navController.pushAsRoot(homepageRoute(LIST_ACTION_SUBSCRIPTION))
-            }
-            R.id.nav_whats_hot -> {
-                navController.pushAsRoot(homepageRoute(LIST_ACTION_WHATS_HOT))
-            }
-            R.id.nav_toplist -> {
-                navController.pushAsRoot(homepageRoute(LIST_ACTION_TOP_LIST))
-            }
-            R.id.nav_favourite -> {
-                pushRoute(EhRoute.Favorites)
-            }
-            R.id.nav_history -> {
-                pushRoute(EhRoute.History)
-            }
-            R.id.nav_downloads -> {
-                pushRoute(EhRoute.Downloads())
-            }
-            R.id.nav_settings -> {
-                pushRoute(EhRoute.Settings)
-            }
+            R.id.nav_homepage -> navController.pushAsRoot(homepageRoute(LIST_ACTION_HOMEPAGE))
+            R.id.nav_subscription -> navController.pushAsRoot(homepageRoute(LIST_ACTION_SUBSCRIPTION))
+            R.id.nav_whats_hot -> navController.pushAsRoot(homepageRoute(LIST_ACTION_WHATS_HOT))
+            R.id.nav_toplist -> navController.pushAsRoot(homepageRoute(LIST_ACTION_TOP_LIST))
+            R.id.nav_favourite -> pushRoute(EhRoute.Favorites)
+            R.id.nav_history -> pushRoute(EhRoute.History)
+            R.id.nav_downloads -> pushRoute(EhRoute.Downloads())
+            R.id.nav_settings -> pushRoute(EhRoute.Settings)
         }
-        if (id != R.id.nav_stub) {
-            mDrawerLayout?.closeDrawers()
-        }
-        return true
+        closeLeftDrawer()
     }
 
-    companion object {
-        private const val KEY_NAV_CHECKED_ITEM = "nav_checked_item"
+    /** 抽屉头的月亮按钮：跟随系统 → 深色 → 浅色 三态循环（与旧 header 一致） */
+    private fun toggleNightMode() {
+        val theme = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_YES <= 0
+        val target = if (((getSystemService(UI_MODE_SERVICE) as UiModeManager).nightMode == UiModeManager.MODE_NIGHT_YES) == theme) {
+            AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        } else if (theme) {
+            AppCompatDelegate.MODE_NIGHT_YES
+        } else {
+            AppCompatDelegate.MODE_NIGHT_NO
+        }
+        AppCompatDelegate.setDefaultNightMode(target)
+        Settings.putTheme(target)
+        recreate()
     }
 }

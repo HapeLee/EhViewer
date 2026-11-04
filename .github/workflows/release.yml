@@ -1,0 +1,17 @@
+name: Release
+
+# 正式版的唯一入口：在默认分支 dev 上手动触发，构建后创建 Tag 与 GitHub Release。
+# 日常 push 只走 ci.yml 与 auto-release.yml 的默认（不发布）行为。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.actor == 'HapeLee' && github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/auto-release.yml
+    with:
+      publish: true
+    secrets: inherit

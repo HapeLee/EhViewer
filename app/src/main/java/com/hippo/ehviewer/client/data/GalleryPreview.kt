@@ -16,7 +16,6 @@
 package com.hippo.ehviewer.client.data
 
 import android.os.Parcelable
-import com.hippo.widget.LoadImageView
 import kotlinx.parcelize.Parcelize
 
 @Parcelize
@@ -29,9 +28,4 @@ class GalleryPreview(
     var offsetY: Int = Int.MIN_VALUE,
     var clipWidth: Int = Int.MIN_VALUE,
     var clipHeight: Int = Int.MIN_VALUE,
-) : Parcelable {
-    fun load(view: LoadImageView) {
-        view.setClip(offsetX, offsetY, clipWidth, clipHeight)
-        view.load(imageKey!!, imageUrl!!, true)
-    }
-}
+) : Parcelable

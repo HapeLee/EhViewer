@@ -23,17 +23,14 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.view.GravityCompat
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.material.datepicker.CalendarConstraints
-import com.google.android.material.datepicker.CompositeDateValidator
-import com.google.android.material.datepicker.DateValidatorPointBackward
-import com.google.android.material.datepicker.DateValidatorPointForward
-import com.google.android.material.datepicker.MaterialDatePicker
-import com.hippo.ehviewer.R
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.compose.component.GoToDateDialog
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.screen.GalleryListScreen
@@ -48,7 +45,8 @@ import com.hippo.ehviewer.ui.host.ehHostOrNoOp
  * 画廊列表页（首页 / 订阅 / 热门 / 榜单 / 任意搜索结果）。
  *
  * P7-c 出壳：状态、请求、监听、宿主副作用全部搬进 [GalleryListViewModel]，
- * 这里只剩「绑定 + 三个宿主交互」（返回键、日期选择器、去重后的抽屉勾选）。
+ * 这里只剩「绑定 + 宿主交互」（返回键、日期选择器、去重后的抽屉勾选）。
+ * 日期选择器是 Compose 的 `GoToDateDialog`，不再往宿主塞 `DialogFragment`。
  *
  * 与出壳前的差异：
  * - `onBackPressed` 的「双击退出」只在 [EhRoute] 处于栈底时生效（旧实现看 `stackIndex`）
@@ -60,7 +58,6 @@ import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 fun GalleryListScene(route: EhRoute.GalleryList) {
     val context = LocalContext.current
     val activity = context as? MainActivity
-    val fragmentActivity = context as? FragmentActivity
     val host = ehHostOrNoOp()
     val navigator = ehNavigator()
     val vm = viewModel { GalleryListViewModel(context.applicationContext) }
@@ -86,31 +83,12 @@ fun GalleryListScene(route: EhRoute.GalleryList) {
     }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        vm.setImageUri(uri)
+        vm.searchByImage(uri)
     }
 
-    fun showGoToDateDialog() {
-        val range = vm.goToDateRange()
-        val constraints = CalendarConstraints.Builder()
-            .setStart(range.first)
-            .setEnd(range.last)
-            .setValidator(
-                CompositeDateValidator.allOf(
-                    listOf(
-                        DateValidatorPointForward.from(range.first),
-                        DateValidatorPointBackward.before(range.last),
-                    ),
-                ),
-            )
-            .build()
-        val datePicker = MaterialDatePicker.Builder.datePicker()
-            .setCalendarConstraints(constraints)
-            .setTitleText(R.string.go_to)
-            .setSelection(vm.goToDateDefault())
-            .build()
-        datePicker.addOnPositiveButtonClickListener { millis -> vm.goToDate(millis) }
-        datePicker.show(fragmentActivity?.supportFragmentManager ?: return, "date-picker")
-    }
+    // 日期选择器是 Compose 对话框，开关状态由这一层持有（不再往宿主 Activity 的
+    // supportFragmentManager 里塞 DialogFragment）
+    var showGoToDate by remember { mutableStateOf(false) }
 
     fun openUrlSuggestion() {
         when (val suggestion = parseUrlSuggestion(vm.keywordQuery)) {
@@ -130,18 +108,20 @@ fun GalleryListScene(route: EhRoute.GalleryList) {
         searchPanel = vm.searchPanel,
         query = vm.keywordQuery,
         onQueryChange = vm::onQueryChange,
-        onOpenNavDrawer = { host.toggleDrawer(GravityCompat.START) },
+        onOpenNavDrawer = { host.toggleLeftDrawer() },
         onEnterSimpleSearch = vm::enterSimpleSearch,
         onEnterSearch = vm::enterSearch,
         onExitSearch = vm::exitSearch,
         onApplySearch = vm::applySearch,
+        searchSuggestions = vm.searchSuggestions,
+        onSelectSuggestion = vm::selectSuggestion,
+        onDeleteSuggestion = vm::deleteSuggestion,
         onSuggestionClick = { if (parseUrlSuggestion(vm.keywordQuery) != null) openUrlSuggestion() },
         onPickImage = {
             pickImage.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
             )
         },
-        onClearImage = { vm.setImageUri(null) },
         onRefresh = vm::refresh,
         onLoadMore = vm::loadMore,
         onOpenDetail = { gi -> navigator.push(EhRoute.GalleryDetail(gid = gi.gid, token = gi.token)) },
@@ -151,7 +131,7 @@ fun GalleryListScene(route: EhRoute.GalleryList) {
         onToggleFavorite = { gi -> activity?.let { vm.toggleFavorite(gi, it) } },
         onMoveDownloadLabel = vm::moveDownloadLabel,
         onToggleLayoutMode = vm::toggleLayoutMode,
-        onGoToDate = ::showGoToDateDialog,
+        onGoToDate = { showGoToDate = true },
         onGoToLastPage = vm::goToLastPage,
         onGoToPage = vm::goToPage,
         onGoToGid = vm::goToGid,
@@ -163,6 +143,18 @@ fun GalleryListScene(route: EhRoute.GalleryList) {
         downloadLabelOptions = vm.downloadLabels,
         pageCount = vm.topListPages,
     )
+
+    if (showGoToDate) {
+        GoToDateDialog(
+            range = vm.goToDateRange(),
+            initialDateMillis = vm.goToDateDefault(),
+            onDismiss = { showGoToDate = false },
+            onConfirm = { millis ->
+                showGoToDate = false
+                vm.goToDate(millis)
+            },
+        )
+    }
 }
 
 /** 把一个不可变快照交给界面层；`version` 用来感知 `GalleryInfo` 的就地修改 */

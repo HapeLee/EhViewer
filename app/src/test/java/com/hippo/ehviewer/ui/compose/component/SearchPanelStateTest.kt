@@ -19,8 +19,8 @@ package com.hippo.ehviewer.ui.compose.component
 
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhUtils
+import com.hippo.ehviewer.client.data.AdvanceSearchFlags
 import com.hippo.ehviewer.client.data.ListUrlBuilder
-import com.hippo.ehviewer.widget.AdvanceSearchTable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,19 +30,16 @@ import org.junit.Test
  */
 class SearchPanelStateTest {
     @Test
-    fun advanceDisabledIgnoresAdvanceFields() {
+    fun emptyAdvanceFieldsDisableAdvanceSearch() {
         val state = SearchPanelState(
             searchMode = ListUrlBuilder.MODE_NORMAL,
             category = EhUtils.DOUJINSHI,
-            advanceEnabled = false,
-            advanceSearch = AdvanceSearchTable.SH,
-            minRating = 4,
-            pageFrom = "10",
-            pageTo = "900",
+            language = 1,
         )
         val criteria = state.buildCriteria("query") as SearchCriteria.Success
         assertEquals(ListUrlBuilder.MODE_NORMAL, criteria.mode)
         assertEquals(EhUtils.DOUJINSHI, criteria.category)
+        assertEquals(1, criteria.language)
         assertEquals("query", criteria.keyword)
         assertEquals(-1, criteria.advanceSearch)
         assertEquals(-1, criteria.minRating)
@@ -51,39 +48,50 @@ class SearchPanelStateTest {
     }
 
     @Test
-    fun advanceEnabledKeepsFields() {
+    fun anyAdvanceFieldEnablesAdvanceSearch() {
+        // 不再有独立开关：星级、页数、过滤开关任意一项非空就带 advsearch
         val state = SearchPanelState(
-            advanceEnabled = true,
-            advanceSearch = AdvanceSearchTable.SH or AdvanceSearchTable.SFT,
             minRating = 3,
             pageFrom = "20",
             pageTo = "200",
         )
         val criteria = state.buildCriteria(null) as SearchCriteria.Success
-        assertEquals(AdvanceSearchTable.SH or AdvanceSearchTable.SFT, criteria.advanceSearch)
+        assertEquals(0, criteria.advanceSearch)
         assertEquals(3, criteria.minRating)
         assertEquals(20, criteria.pageFrom)
         assertEquals(200, criteria.pageTo)
+
+        val flagOnly = SearchPanelState(advanceSearch = AdvanceSearchFlags.SH or AdvanceSearchFlags.SFT)
+            .buildCriteria(null) as SearchCriteria.Success
+        assertEquals(AdvanceSearchFlags.SH or AdvanceSearchFlags.SFT, flagOnly.advanceSearch)
+        assertEquals(-1, flagOnly.minRating)
     }
 
     @Test
-    fun pageRangeValidationMatchesLegacyMessages() {
-        assertEquals(
-            R.string.search_sp_err0,
-            (SearchPanelState(advanceEnabled = true, pageFrom = "1001").buildCriteria(null) as SearchCriteria.Failure).messageRes,
-        )
-        assertEquals(
-            R.string.search_sp_err1,
-            (SearchPanelState(advanceEnabled = true, pageTo = "9").buildCriteria(null) as SearchCriteria.Failure).messageRes,
-        )
-        assertEquals(
-            R.string.search_sp_err2,
-            (SearchPanelState(advanceEnabled = true, pageFrom = "10", pageTo = "25").buildCriteria(null) as SearchCriteria.Failure).messageRes,
-        )
-        assertEquals(
-            R.string.search_sp_err3,
-            (SearchPanelState(advanceEnabled = true, pageFrom = "40", pageTo = "60").buildCriteria(null) as SearchCriteria.Failure).messageRes,
-        )
+    fun pageRangeValidationMatchesReference() {
+        // 只填最大值：至少 10
+        assertEquals(R.string.search_sp_err1, validatePageRange(0, 9))
+        assertEquals(0, validatePageRange(0, 10))
+        // 两端都填：最小值不得超过 min(max / 2, max - 20)
+        assertEquals(0, validatePageRange(10, 40))
+        assertEquals(R.string.search_sp_err2, validatePageRange(10, 25))
+        assertEquals(R.string.search_sp_err2, validatePageRange(40, 60))
+        // 都不填：不校验
+        assertEquals(0, validatePageRange(0, 0))
+    }
+
+    @Test
+    fun pageRangeClampedOnSubmit() {
+        // 提交侧把输入收敛到 0..1000 / 0..2000，超界不再报错
+        val criteria = SearchPanelState(pageFrom = "1001", pageTo = "3000").buildCriteria(null) as SearchCriteria.Success
+        assertEquals(1000, criteria.pageFrom)
+        assertEquals(2000, criteria.pageTo)
+    }
+
+    @Test
+    fun invalidPageRangeFailsSubmit() {
+        val failure = SearchPanelState(pageFrom = "10", pageTo = "25").buildCriteria(null) as SearchCriteria.Failure
+        assertEquals(R.string.search_sp_err2, failure.messageRes)
     }
 
     @Test
@@ -111,9 +119,20 @@ class SearchPanelStateTest {
     }
 
     @Test
-    fun imageTabRequiresImage() {
-        val state = SearchPanelState(tab = SearchPanelTab.IMAGE)
-        val failure = state.buildCriteria(null) as SearchCriteria.Failure
-        assertEquals(R.string.select_image_first, failure.messageRes)
+    fun searchModeComesFromEntry() {
+        // 入口带进来的模式作为默认值
+        val state = SearchPanelState(searchMode = ListUrlBuilder.MODE_UPLOADER)
+        val criteria = state.buildCriteria("someone") as SearchCriteria.Success
+        assertEquals(ListUrlBuilder.MODE_UPLOADER, criteria.mode)
+    }
+
+    @Test
+    fun searchModeChipSwitchIsSubmitted() {
+        // 第三行的模式 chip 直接改 state.searchMode，提交时用它
+        val state = SearchPanelState()
+        assertEquals(ListUrlBuilder.MODE_NORMAL, state.searchMode)
+        state.searchMode = ListUrlBuilder.MODE_TAG
+        val criteria = state.buildCriteria("tag") as SearchCriteria.Success
+        assertEquals(ListUrlBuilder.MODE_TAG, criteria.mode)
     }
 }

@@ -15,20 +15,18 @@
  */
 package com.hippo.ehviewer.ui.host
 
-import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.core.view.GravityCompat
 import androidx.core.view.SoftwareKeyboardControllerCompat
-import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -41,6 +39,7 @@ import com.hippo.ehviewer.ui.compose.nav.EhNavigator
 import com.hippo.ehviewer.ui.compose.nav.EhNavigatorProvider
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.LocalEhNavigator
+import com.hippo.ehviewer.ui.compose.nav.NavTransitions
 import com.hippo.ehviewer.ui.compose.nav.decodeRoute
 import com.hippo.ehviewer.ui.compose.nav.hasLeftDrawer
 import com.hippo.ehviewer.ui.compose.nav.initialCheckRoute
@@ -48,6 +47,7 @@ import com.hippo.ehviewer.ui.compose.nav.legacyRouteOf
 import com.hippo.ehviewer.ui.compose.nav.navCheckedItem
 import com.hippo.ehviewer.ui.compose.reader.ReaderRoute
 import com.hippo.ehviewer.ui.compose.theme.EhTheme
+import com.hippo.ehviewer.ui.compose.theme.ehWindowBackground
 import com.hippo.ehviewer.ui.page.downloads.DownloadsScene
 import com.hippo.ehviewer.ui.page.favorites.FavoritesScene
 import com.hippo.ehviewer.ui.page.gallery.GalleryCommentsScene
@@ -65,6 +65,14 @@ import com.hippo.ehviewer.ui.page.security.WebViewSignInScene
 import com.hippo.ehviewer.ui.page.settings.AboutScene
 import com.hippo.ehviewer.ui.page.settings.SettingsCategoryScene
 import com.hippo.ehviewer.ui.page.settings.SettingsScene
+
+/**
+ * 宿主壳：接收「页面内容」这个 @Composable，返回包好的组合。
+ *
+ * `MainActivity` 用它把返回栈包进抽屉 / Snackbar 容器（见 `MainShell`）；
+ * 子类不覆写时就是原样透传。
+ */
+typealias HostShell = @Composable (content: @Composable () -> Unit) -> Unit
 
 /**
  * 应用级导航宿主：一个 Activity、一棵 Compose 树、一个 [NavDisplay] 返回栈。
@@ -99,16 +107,20 @@ abstract class EhNavHostActivity : EhActivity(), EhNavigatorProvider {
             host?.showTip(id, length)
         }
 
+        override fun showDialog(request: DialogRequest) {
+            host?.showDialog(request)
+        }
+
         override fun setNavCheckedItem(resId: Int) {
             host?.setNavCheckedItem(resId)
         }
 
-        override fun setDrawerLockMode(lockMode: Int, edgeGravity: Int) {
-            host?.setDrawerLockMode(lockMode, edgeGravity)
+        override fun setLeftDrawerEnabled(enabled: Boolean) {
+            host?.setLeftDrawerEnabled(enabled)
         }
 
-        override fun toggleDrawer(drawerGravity: Int) {
-            host?.toggleDrawer(drawerGravity)
+        override fun toggleLeftDrawer() {
+            host?.toggleLeftDrawer()
         }
 
         override fun updateProfile() {
@@ -129,23 +141,35 @@ abstract class EhNavHostActivity : EhActivity(), EhNavigatorProvider {
     protected abstract fun initialRoute(): EhRoute
 
     /**
-     * 子类在这里 `setContentView(...)` 并绑定抽屉 / Snackbar 容器。
-     * 必须提供 `R.id.nav_host` 的 `ComposeView`。
+     * 宿主壳：把页面栈包进抽屉 / Snackbar 之类的应用级容器。
+     *
+     * 默认什么都不包（`{ it }`），`MainActivity` 覆写成 [MainShell]。返回值在 `onCreate`
+     * 里取一次，组合树重组不会换掉外层容器。
      */
-    protected abstract fun setupContent(savedInstanceState: Bundle?)
+    protected open fun shell(): HostShell = { it }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 兜底返回：优先级最低，页面内 BackHandler 与 NavDisplay 的返回回调都比它晚注册
+        installBackFallback()
+        // 窗口背景跟动态取色对齐：没给自己铺底的页面（下载页）会直接透出窗口色。
+        // manifest 上挂的是库自带的 `Theme.Material3.DayNight.NoActionBar`，它的
+        // windowBackground 是 M3 的静态色（不跟 Monet，也不是 AMOLED 的纯黑），
+        // 所以只能在这里按当前色板重新铺一次（启动画面那一帧仍然是库的默认色）。
+        window.setBackgroundDrawable(ColorDrawable(ehWindowBackground(this)))
         // 先把根页面放进栈（组合还没起来，压栈会攒在 EhNavController 里）
         navEntries.add(initialRoute())
-        setupContent(savedInstanceState)
-        val composeView = findViewById<ComposeView>(R.id.nav_host)
-        composeView.setViewCompositionStrategy(
-            ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
-        )
-        composeView.setContent {
+        val shell = shell()
+        setContent {
             EhTheme {
-                EhSceneDisplay(navController)
+                shell {
+                    CompositionLocalProvider(
+                        LocalEhHost provides hostState,
+                        LocalEhNavigator provides navController,
+                    ) {
+                        SceneStack()
+                    }
+                }
             }
         }
         if (savedInstanceState == null) {
@@ -223,18 +247,29 @@ abstract class EhNavHostActivity : EhActivity(), EhNavigatorProvider {
         navController.refreshTop()
     }
 
-    @Deprecated("Deprecated in Java")
-    @SuppressLint("MissingSuperCall")
-    override fun onBackPressed() {
-        if (onInterceptBack()) {
-            return
-        }
-        if (navController.size > 1) {
-            navController.pop()
-        } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
-        }
+    /**
+     * 返回键的兜底处理。
+     *
+     * 开了 `enableOnBackInvokedCallback` 之后系统不再回调 `onBackPressed()`，一切走
+     * `OnBackPressedDispatcher`；这里注册的 callback 是**最早**注册的一个，所以优先级最低：
+     * 页面里的 `BackHandler`（关评论框、退搜索、关抽屉）和 `NavDisplay` 自己的返回回调
+     * （栈深 > 1 时弹栈，带预测性返回动画）都在它之后注册，会先被派发。
+     * 只有它们都没启用（栈底、抽屉关着）时才轮到这里。
+     */
+    private fun installBackFallback() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (onInterceptBack()) return
+                    if (navController.size > 1) {
+                        navController.pop()
+                    } else {
+                        finish()
+                    }
+                }
+            },
+        )
     }
 
     companion object {
@@ -254,21 +289,16 @@ abstract class EhNavHostActivity : EhActivity(), EhNavigatorProvider {
  * `rememberNavBackStack` 出来的栈挂上去，攒着的压栈操作这时才回放。
  */
 @Composable
-private fun EhNavHostActivity.EhSceneDisplay(controller: EhNavController) {
-    val backStack = rememberNavBackStack(controller.entries.first())
+private fun EhNavHostActivity.SceneStack() {
+    val backStack = rememberNavBackStack(navController.entries.first())
     LaunchedEffect(backStack) {
         @Suppress("UNCHECKED_CAST")
-        controller.attach(backStack as MutableList<EhRoute>)
+        navController.attach(backStack as MutableList<EhRoute>)
     }
     DisposableEffect(backStack) {
-        onDispose { controller.detach() }
+        onDispose { navController.detach() }
     }
-    CompositionLocalProvider(
-        LocalEhHost provides hostState,
-        LocalEhNavigator provides controller,
-    ) {
-        EhSceneShell(controller, backStack)
-    }
+    EhSceneShell(navController, backStack)
 }
 
 /**
@@ -280,14 +310,7 @@ private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStac
     val route = backStack.lastOrNull() as? EhRoute
     DisposableEffect(route) {
         if (route != null) {
-            hostState.setDrawerLockMode(
-                if (route.hasLeftDrawer) {
-                    DrawerLayout.LOCK_MODE_UNLOCKED
-                } else {
-                    DrawerLayout.LOCK_MODE_LOCKED_CLOSED
-                },
-                GravityCompat.START,
-            )
+            hostState.setLeftDrawerEnabled(route.hasLeftDrawer)
             hostState.setNavCheckedItem(route.navCheckedItem)
         }
         onDispose {}
@@ -300,6 +323,10 @@ private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStac
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
         ),
+        // 进退场动画见 NavTransitions（来自 Matter：滑入 + 视差 + 返回时 0.8x 收缩）
+        transitionSpec = { NavTransitions.forward(this) },
+        popTransitionSpec = { NavTransitions.pop(this) },
+        predictivePopTransitionSpec = { _ -> NavTransitions.predictivePop(this) },
         entryProvider = entryProvider {
             // 已经出壳的页面：直接是 @Composable，没有 Fragment 这一层
             entry<EhRoute.SelectSite> { SelectSiteScene(it) }
@@ -317,7 +344,7 @@ private fun EhNavHostActivity.EhSceneShell(controller: EhNavController, backStac
             entry<EhRoute.GalleryPreviews> { GalleryPreviewsScene(it) }
             entry<EhRoute.Progress> { ProgressScene(it) }
             entry<EhRoute.Reader> { ReaderRoute(it) }
-            // 设置：首页与关于页已经是纯 Compose，分类页过渡期仍由 SettingsActivity 承载
+            // 设置：首页、九个分类子页、关于页全部就地渲染
             entry<EhRoute.Settings> { SettingsScene() }
             entry<EhRoute.SettingsCategory> { SettingsCategoryScene(it) }
             entry<EhRoute.About> { AboutScene() }

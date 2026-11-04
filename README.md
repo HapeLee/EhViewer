@@ -7,7 +7,7 @@
 </p>
 
 <h1 align="center">
-  <img src="https://github.com/EhViewer-NekoInverter/Arts/blob/main/launcher_icon-web.webp" width="150" alt="EhViewer">
+  <img src="design/brand/eh-launcher/release-icon.png" width="150" alt="EhViewer">
   <br>EhViewer<br>
 </h1>
 

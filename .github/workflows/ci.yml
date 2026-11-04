@@ -1,5 +1,7 @@
 name: CI
 
+# 日常校验：push / PR 只跑格式检查、单测与 release 构建，不产出 Release。
+# 正式发布走 release.yml -> auto-release.yml。
 on:
   push:
     branches:
@@ -7,61 +9,62 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  linux:
+  verify:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # versionCode 取自提交数，浅克隆会算成 1
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 21
+          # 与 gradle/gradle-daemon-jvm.properties 的 toolchainVersion 保持一致，
+          # 否则 Gradle 每次运行都要重新下载一个 JDK 25
+          java-version: '25'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # aliyun 镜像在 runner 上会 502，且 Gradle 一旦判定某个仓库失败就会整体停用它
+      - name: Remove Aliyun mirrors
+        run: sed -i '/maven.aliyun.com/d' settings.gradle.kts
+
       - name: Spotless Check
         run: ./gradlew spotlessCheck
 
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
       - name: Gradle Build
-        run: ./gradlew assembleRelease
+        run: ./gradlew :app:assembleRelease --console=plain
 
-      - name: Upload Universal
+      - name: Upload release APK
         uses: actions/upload-artifact@v7
         with:
-          name: universal-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-universal-release.apk
+          name: eh-release-${{ github.sha }}
+          if-no-files-found: error
+          path: app/build/outputs/apk/release/app-release.apk
 
-      - name: Upload ARM64
+      - name: Upload unit test reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: arm64-v8a-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-arm64-v8a-release.apk
-
-      - name: Upload ARM32
-        uses: actions/upload-artifact@v7
-        with:
-          name: armeabi-v7a-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-armeabi-v7a-release.apk
-
-      - name: Upload x86_64
-        uses: actions/upload-artifact@v7
-        with:
-          name: x86_64-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-x86_64-release.apk
-
-      - name: Upload mapping
-        uses: actions/upload-artifact@v7
-        with:
-          name: mapping-${{ github.sha }}
-          path: app/build/outputs/mapping/release/mapping.txt
-
-      - name: Upload native debug symbols
-        uses: actions/upload-artifact@v7
-        with:
-          name: native-debug-symbols-${{ github.sha }}
-          path: app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+          name: eh-unit-test-reports
+          if-no-files-found: warn
+          path: |
+            app/build/test-results/testDebugUnitTest/**
+            app/build/reports/tests/testDebugUnitTest/**

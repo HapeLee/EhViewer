@@ -18,109 +18,73 @@
 package com.hippo.ehviewer.ui.compose.screen.settings
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.res.integerArrayResource
+import androidx.compose.ui.res.stringArrayResource
+import androidx.compose.ui.res.stringResource
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
+import com.hippo.ehviewer.asMutableState
+import eu.kanade.tachiyomi.ui.reader.setting.OrientationType
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingModeType
 
 /**
- * 阅读分类页（原 `read_settings.xml` + `ReadFragment`）。
+ * 阅读分类页。
  *
- * 两项 `android:dependency="volume_page"` / `"custom_screen_lightness"` 的老写法
- * 换成 `enabled`：条件项变灰而不是消失，用户能看到「先打开开关」。
+ * 阅读器已经自带三页设置面板（EHz 那一套），这里只放「进阅读器之前就想调」的几项：
+ * 模式、方向、主题、全屏、常亮、音量键。每条都直接读写阅读器真正用的 key，
+ * 不再经过旧的 `KEY_READING_DIRECTION` 那一批（编码不同，留着只会写出无人读取的值）。
+ *
+ * 行用的是 [ListFieldRow] / [SwitchFieldRow]（绑 `MutableState` 的版本），
+ * 而不是阅读器面板里的 `SpinnerChoice` / `SwitchChoice`——后者的标题是次级色、
+ * 也没有摘要行，摆在分组卡里会和别的分类页对不上。
  */
 @Composable
 fun ReadSettingsScreen(onBack: () -> Unit) {
-    val volumePage = Settings.valueFlow(Settings.KEY_VOLUME_PAGE, false)
-        .collectAsState(initial = Settings.volumePage).value
-    val customLightness = Settings.valueFlow(Settings.KEY_CUSTOM_SCREEN_LIGHTNESS, false)
-        .collectAsState(initial = Settings.customScreenLightness).value
-
     SettingsScaffold(titleRes = R.string.settings_read, onBack = onBack) {
-        ListPreferenceRow(
-            key = Settings.KEY_SCREEN_ROTATION,
-            default = 0,
-            titleRes = R.string.settings_read_screen_rotation,
-            entriesRes = R.array.screen_rotation_entries,
-            valuesRes = R.array.screen_rotation_entry_values,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_READING_DIRECTION,
-            default = 1,
-            titleRes = R.string.settings_read_reading_direction,
-            entriesRes = R.array.reading_direction_entries,
-            valuesRes = R.array.reading_direction_entry_values,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_PAGE_SCALING,
-            default = 3,
-            titleRes = R.string.settings_read_page_scaling,
-            entriesRes = R.array.page_scaling_entries,
-            valuesRes = R.array.page_scaling_entry_values,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_START_POSITION,
-            default = 1,
-            titleRes = R.string.settings_read_start_position,
-            entriesRes = R.array.start_position_entries,
-            valuesRes = R.array.start_position_values,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_READ_THEME,
-            default = 1,
-            titleRes = R.string.settings_read_theme,
-            entriesRes = R.array.read_theme_entries,
-            valuesRes = R.array.read_theme_entry_values,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_KEEP_SCREEN_ON,
-            default = false,
-            titleRes = R.string.settings_read_keep_screen_on,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_SHOW_PAGE_INTERVAL,
-            default = false,
-            titleRes = R.string.settings_read_show_page_interval,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_TURN_PAGE_INTERVAL,
-            default = 5,
-            titleRes = R.string.settings_read_turn_page_interval,
-            range = 1..30,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_VOLUME_PAGE,
-            default = false,
-            titleRes = R.string.settings_read_volume_page,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_VOLUME_PAGE_INTERVAL,
-            default = 1,
-            titleRes = R.string.settings_read_volume_page_interval,
-            range = 0..14,
-            enabled = volumePage,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_REVERSE_VOLUME_PAGE,
-            default = false,
-            titleRes = R.string.settings_read_reverse_volume,
-            enabled = volumePage,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_READING_FULLSCREEN,
-            default = true,
-            titleRes = R.string.settings_read_reading_fullscreen,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_CUSTOM_SCREEN_LIGHTNESS,
-            default = false,
-            titleRes = R.string.settings_read_custom_screen_lightness,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_SCREEN_LIGHTNESS,
-            default = 50,
-            titleRes = R.string.settings_read_screen_lightness,
-            range = 0..200,
-            enabled = customLightness,
-        )
+        SettingsGroup {
+            ListFieldRow(
+                title = stringResource(R.string.pref_category_reading_mode),
+                entries = stringArrayResource(R.array.viewers_selector).toList(),
+                values = ReadingModeType.entries.map { it.prefValue },
+                field = Settings.readingMode.asMutableState(),
+            )
+            ListFieldRow(
+                title = stringResource(R.string.rotation_type),
+                entries = stringArrayResource(R.array.rotation_type).toList(),
+                values = OrientationType.entries.map { it.prefValue },
+                field = Settings.orientationMode.asMutableState(),
+            )
+            ListFieldRow(
+                title = stringResource(R.string.pref_reader_theme),
+                entries = stringArrayResource(R.array.reader_themes).toList(),
+                values = integerArrayResource(R.array.reader_themes_values).toList(),
+                field = Settings.readerTheme.asMutableState(),
+            )
+        }
+
+        SettingsGroup {
+            SwitchFieldRow(
+                title = stringResource(R.string.pref_fullscreen),
+                field = Settings.fullscreen.asMutableState(),
+            )
+            SwitchFieldRow(
+                title = stringResource(R.string.pref_keep_screen_on),
+                field = Settings.keepScreenOnPref.asMutableState(),
+            )
+        }
+
+        SettingsGroup {
+            val volume = Settings.readWithVolumeKeys.asMutableState()
+            SwitchFieldRow(
+                title = stringResource(R.string.settings_read_volume_page),
+                field = volume,
+            )
+            if (volume.value) {
+                SwitchFieldRow(
+                    title = stringResource(R.string.settings_read_reverse_volume),
+                    field = Settings.readWithVolumeKeysInverted.asMutableState(),
+                )
+            }
+        }
     }
 }

@@ -44,76 +44,91 @@ fun AdvancedSettingsScreen(
     onAppLanguageChanged: (String) -> Unit,
 ) {
     SettingsScaffold(titleRes = R.string.settings_advanced, onBack = onBack) {
-        SwitchPreferenceRow(
-            key = Settings.KEY_SAVE_PARSE_ERROR_BODY,
-            default = true,
-            titleRes = R.string.settings_advanced_save_parse_error_body,
-            summaryRes = R.string.settings_advanced_save_parse_error_body_summary,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_SAVE_CRASH_LOG,
-            default = true,
-            titleRes = R.string.settings_advanced_save_crash_log,
-            summaryRes = R.string.settings_advanced_save_crash_log_summary,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_dump_logcat),
-            summary = stringResource(R.string.settings_advanced_dump_logcat_summary),
-            enabled = !busy,
-            onClick = onDumpLogcat,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_READ_CACHE_SIZE,
-            default = 320,
-            titleRes = R.string.settings_advanced_read_cache_size,
-            entriesRes = R.array.read_cache_size_entries,
-            valuesRes = R.array.read_cache_size_entry_values,
-        )
-        StringListPreferenceRow(
-            key = Settings.KEY_APP_LANGUAGE,
-            default = "system",
-            titleRes = R.string.settings_advanced_app_language_title,
-            entriesRes = R.array.app_language_entries,
-            valuesRes = R.array.app_language_entry_values,
-            onChange = onAppLanguageChanged,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_proxy),
-            summary = proxySummary,
-            onClick = onOpenProxy,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_DOH,
-            default = true,
-            titleRes = R.string.settings_advanced_dns_over_http_title,
-            summaryRes = R.string.settings_advanced_dns_over_http_summary,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_user_agent_title),
-            summary = userAgent,
-            onClick = onOpenUserAgent,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_backup_favorite),
-            summary = stringResource(R.string.settings_advanced_backup_favorite_summary),
-            enabled = !busy,
-            onClick = onBackupFavorite,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_export_data),
-            summary = stringResource(R.string.settings_advanced_export_data_summary),
-            enabled = !busy,
-            onClick = onExportData,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_import_data),
-            summary = stringResource(R.string.settings_advanced_import_data_summary),
-            enabled = !busy,
-            onClick = onImportData,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_advanced_open_by_default),
-            onClick = onOpenByDefault,
-        )
+        // 日志与诊断
+        SettingsGroup {
+            SwitchPreferenceRow(
+                key = Settings.KEY_SAVE_PARSE_ERROR_BODY,
+                default = true,
+                titleRes = R.string.settings_advanced_save_parse_error_body,
+                summaryRes = R.string.settings_advanced_save_parse_error_body_summary,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_SAVE_CRASH_LOG,
+                default = true,
+                titleRes = R.string.settings_advanced_save_crash_log,
+                summaryRes = R.string.settings_advanced_save_crash_log_summary,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_dump_logcat),
+                summary = stringResource(R.string.settings_advanced_dump_logcat_summary),
+                enabled = !busy,
+                onClick = onDumpLogcat,
+            )
+        }
+
+        // 缓存与语言
+        SettingsGroup {
+            ListPreferenceRow(
+                key = Settings.KEY_READ_CACHE_SIZE,
+                default = 320,
+                titleRes = R.string.settings_advanced_read_cache_size,
+                entriesRes = R.array.read_cache_size_entries,
+                valuesRes = R.array.read_cache_size_entry_values,
+            )
+            StringListPreferenceRow(
+                key = Settings.KEY_APP_LANGUAGE,
+                default = "system",
+                titleRes = R.string.settings_advanced_app_language_title,
+                entriesRes = R.array.app_language_entries,
+                valuesRes = R.array.app_language_entry_values,
+                onChange = onAppLanguageChanged,
+            )
+        }
+
+        // 网络
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_proxy),
+                summary = proxySummary,
+                onClick = onOpenProxy,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_DOH,
+                default = true,
+                titleRes = R.string.settings_advanced_dns_over_http_title,
+                summaryRes = R.string.settings_advanced_dns_over_http_summary,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_user_agent_title),
+                summary = userAgent,
+                onClick = onOpenUserAgent,
+            )
+        }
+
+        // 备份与导入
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_backup_favorite),
+                summary = stringResource(R.string.settings_advanced_backup_favorite_summary),
+                enabled = !busy,
+                onClick = onBackupFavorite,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_export_data),
+                summary = stringResource(R.string.settings_advanced_export_data_summary),
+                enabled = !busy,
+                onClick = onExportData,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_import_data),
+                summary = stringResource(R.string.settings_advanced_import_data_summary),
+                enabled = !busy,
+                onClick = onImportData,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_advanced_open_by_default),
+                onClick = onOpenByDefault,
+            )
+        }
     }
 }

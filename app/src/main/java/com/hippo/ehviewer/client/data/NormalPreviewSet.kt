@@ -16,7 +16,6 @@
 package com.hippo.ehviewer.client.data
 
 import com.hippo.ehviewer.client.getNormalPreviewKey
-import com.hippo.widget.LoadImageView
 import com.hippo.yorozuya.collect.IntList
 
 class NormalPreviewSet(
@@ -70,15 +69,5 @@ class NormalPreviewSet(
         galleryPreview.clipWidth = mClipWidthList[index]
         galleryPreview.clipHeight = mClipHeightList[index]
         return galleryPreview
-    }
-
-    override fun load(view: LoadImageView, gid: Long, index: Int) {
-        view.setClip(
-            mOffsetXList[index],
-            mOffsetYList[index],
-            mClipWidthList[index],
-            mClipHeightList[index],
-        )
-        view.load(mImageKeyList[index], mImageUrlList[index], true)
     }
 }

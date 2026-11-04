@@ -36,27 +36,29 @@ fun PrivacySettingsScreen(
     onClearSearchHistory: () -> Unit,
 ) {
     SettingsScaffold(titleRes = R.string.settings_privacy, onBack = onBack) {
-        PreferenceRow(
-            title = stringResource(R.string.settings_privacy_pattern_protection_title),
-            summary = stringResource(
-                if (patternSet) {
-                    R.string.settings_privacy_pattern_protection_set
-                } else {
-                    R.string.settings_privacy_pattern_protection_not_set
-                },
-            ),
-            onClick = onOpenPattern,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_SEC_SECURITY,
-            default = false,
-            titleRes = R.string.settings_privacy_secure,
-            summaryRes = R.string.settings_privacy_secure_summary,
-        )
-        PreferenceRow(
-            title = stringResource(R.string.settings_privacy_clear_search_history),
-            summary = stringResource(R.string.settings_privacy_clear_search_history_summary),
-            onClick = onClearSearchHistory,
-        )
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_privacy_pattern_protection_title),
+                summary = stringResource(
+                    if (patternSet) {
+                        R.string.settings_privacy_pattern_protection_set
+                    } else {
+                        R.string.settings_privacy_pattern_protection_not_set
+                    },
+                ),
+                onClick = onOpenPattern,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_SEC_SECURITY,
+                default = false,
+                titleRes = R.string.settings_privacy_secure,
+                summaryRes = R.string.settings_privacy_secure_summary,
+            )
+            PreferenceRow(
+                title = stringResource(R.string.settings_privacy_clear_search_history),
+                summary = stringResource(R.string.settings_privacy_clear_search_history_summary),
+                onClick = onClearSearchHistory,
+            )
+        }
     }
 }

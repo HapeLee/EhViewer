@@ -526,7 +526,8 @@ object Settings {
     }
 
     val readingDirection: Int
-        get() = getIntFromStr(KEY_READING_DIRECTION, DEFAULT_READING_DIRECTION).coerceIn(0, 2)
+        // 0..3：3 = 条漫连续滚动（LAYOUT_WEBTOON），旧值 0..2 的含义不变
+        get() = getIntFromStr(KEY_READING_DIRECTION, DEFAULT_READING_DIRECTION).coerceIn(0, 3)
     fun putReadingDirection(value: Int) {
         putIntToStr(KEY_READING_DIRECTION, value)
     }
@@ -603,6 +604,49 @@ object Settings {
     fun putScreenLightness(value: Int) {
         putInt(KEY_SCREEN_LIGHTNESS, value)
     }
+
+    /********************
+     ****** Reader（EHz 复刻）
+     ********************/
+
+    // 阅读模式：0 DEFAULT / 1 LTR / 2 RTL / 3 纵向 / 4 条漫 / 5 连续纵向。
+    // 与旧的 KEY_READING_DIRECTION(0..3) 编码不同，所以另开一个 key，旧值不再解读。
+    val readingMode = IntPref("reader_reading_mode", 0)
+    val orientationMode = IntPref("reader_orientation_mode", 0)
+    val readerTheme = IntPref("reader_theme", 1)
+    val showPageNumber = BoolPref("reader_show_page_number", true)
+    val showReaderSeekbar = BoolPref("reader_show_seekbar", true)
+    val doubleTapToZoom = BoolPref("reader_double_tap_zoom", true)
+    val fullscreen = BoolPref("reader_fullscreen", true)
+    val cutoutShort = BoolPref("reader_cutout_short", true)
+    val readerLongTapAction = BoolPref("reader_long_tap", true)
+    val pageTransitions = BoolPref("reader_page_transitions", true)
+    val readWithVolumeKeys = BoolPref(KEY_VOLUME_PAGE, DEFAULT_VOLUME_PAGE)
+    val readWithVolumeKeysInverted = BoolPref(KEY_REVERSE_VOLUME_PAGE, DEFAULT_REVERSE_VOLUME_PAGE)
+    val grayScale = BoolPref("reader_grayscale", false)
+    val invertedColors = BoolPref("reader_inverted_colors", false)
+    val readerPagerNav = IntPref("reader_nav_pager", 0)
+    val readerPagerNavInverted = IntPref("reader_nav_pager_inverted", 0)
+    val readerWebtoonNav = IntPref("reader_nav_webtoon", 0)
+    val readerWebtoonNavInverted = IntPref("reader_nav_webtoon_inverted", 0)
+    val webtoonSidePadding = IntPref("reader_webtoon_side_padding", 0)
+    val navigateToPan = BoolPref("reader_navigate_pan", true)
+    val imageScaleType = IntPref("reader_image_scale_type", 1)
+    val landscapeZoom = BoolPref("reader_landscape_zoom", false)
+    val zoomStart = IntPref("reader_zoom_start", 1)
+    val cropBorder = BoolPref("reader_crop_border", false)
+    val showNavigationOverlayNewUser = BoolPref("reader_nav_overlay_new_user", true)
+    val showNavigationOverlayOnStart = BoolPref("reader_nav_overlay_on_start", false)
+    val customBrightness = BoolPref("reader_custom_brightness", false)
+    val customBrightnessValue = IntPref("reader_brightness_value", 0)
+    val colorFilter = BoolPref("reader_color_filter", false)
+    val colorFilterValue = IntPref("reader_color_filter_value", 0)
+    val colorFilterMode = IntPref("reader_color_filter_mode", 0)
+    val readerPreloadImage = IntPref("reader_preload_image", 5)
+    val hardwareBitmapThreshold = IntPref("reader_hardware_bitmap_threshold", 16384)
+
+    // 旧的 XML 设置页还在写这几个 key，保留读口子，避免设置项变成死代码
+    val keepScreenOnPref = BoolPref(KEY_KEEP_SCREEN_ON, DEFAULT_KEEP_SCREEN_ON)
 
     val downloadLocation: UniFile?
         get() {

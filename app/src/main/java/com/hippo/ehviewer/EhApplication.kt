@@ -19,11 +19,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.StrictMode
-import android.text.method.LinkMovementMethod
 import android.util.Log
-import android.view.View
-import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.collection.LruCache
 import coil3.ImageLoader
@@ -49,7 +45,10 @@ import com.hippo.ehviewer.coil.MergeInterceptor
 import com.hippo.ehviewer.dao.buildMainDB
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.ui.EhActivity
+import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.host.DialogRequest
 import com.hippo.ehviewer.ui.keepNoMediaFileStatus
+import com.hippo.ehviewer.ui.reader.clearReaderCache
 import com.hippo.ehviewer.widget.SearchDatabase
 import com.hippo.okhttp.CloudflareInterceptor
 import com.hippo.util.ReadableTime
@@ -160,23 +159,19 @@ class EhApplication :
         if (Settings.hideHvEvents && html.contains("You have encountered a monster!")) {
             return
         }
-        val activity = topActivity
-        activity?.runOnUiThread {
-            val dialog = AlertDialog.Builder(activity)
-                .setMessage(loadHtml(html))
-                .setPositiveButton(android.R.string.ok, null)
-                .create()
-            dialog.setOnShowListener {
-                val messageView = dialog.findViewById<View>(android.R.id.message)
-                if (messageView is TextView) {
-                    messageView.movementMethod = LinkMovementMethod.getInstance()
-                }
-            }
-            try {
-                dialog.show()
-            } catch (_: Throwable) {
-                // ignore
-            }
+        // 公告是 HTML：转成 Spanned 交给宿主对话框，链接由 DialogHost 里的 TextView 负责点击
+        val activity = topActivity as? MainActivity ?: return
+        activity.runOnUiThread {
+            val rich = loadHtml(html)
+            activity.showDialog(
+                DialogRequest.Message(
+                    title = null,
+                    message = rich.toString(),
+                    richMessage = rich,
+                    positiveText = activity.getString(android.R.string.ok),
+                    onPositive = {},
+                ),
+            )
         }
     }
 
@@ -189,6 +184,9 @@ class EhApplication :
         if (null != dir) {
             FileUtils.deleteContent(dir)
         }
+        // 阅读器缓存（cache/reader/<gid>）：正常退出时页源自删，进程被杀就留下了。
+        // 启动时一定没有活跃阅读器，整体清一次最省事。
+        clearReaderCache(this)
     }
 
     fun putGlobalStuff(o: Any): Int {

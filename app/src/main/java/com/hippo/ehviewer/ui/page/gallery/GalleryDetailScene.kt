@@ -22,14 +22,18 @@ import android.content.Intent
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hippo.app.CheckBoxDialogBuilder
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.UrlOpener
@@ -51,13 +55,22 @@ import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
 import com.hippo.ehviewer.ui.compose.nav.galleryQueryOf
+import com.hippo.ehviewer.ui.compose.screen.ArchiveListDialog
+import com.hippo.ehviewer.ui.compose.screen.ArchiveListState
 import com.hippo.ehviewer.ui.compose.screen.CommentUi
+import com.hippo.ehviewer.ui.compose.screen.ConfirmDialog
+import com.hippo.ehviewer.ui.compose.screen.DeleteDownloadDialog
 import com.hippo.ehviewer.ui.compose.screen.GalleryDetailScreen
 import com.hippo.ehviewer.ui.compose.screen.GalleryDetailUiState
+import com.hippo.ehviewer.ui.compose.screen.ListChoiceDialog
 import com.hippo.ehviewer.ui.compose.screen.PreviewUi
+import com.hippo.ehviewer.ui.compose.screen.RateDialog
 import com.hippo.ehviewer.ui.compose.screen.TagGroupUi
 import com.hippo.ehviewer.ui.compose.screen.TagStatus
 import com.hippo.ehviewer.ui.compose.screen.TagUi
+import com.hippo.ehviewer.ui.compose.screen.TextInputDialog
+import com.hippo.ehviewer.ui.compose.screen.TorrentListDialog
+import com.hippo.ehviewer.ui.compose.screen.TorrentListState
 import com.hippo.ehviewer.ui.host.OnHostResume
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_LONG
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_SHORT
@@ -68,7 +81,6 @@ import com.hippo.util.ReadableTime
 import com.hippo.util.addTextToClipboard
 import com.hippo.util.launchIO
 import com.hippo.util.withUIContext
-import kotlin.math.roundToInt
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
@@ -104,19 +116,14 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
 
     OnHostResume { vm.syncOnResume() }
 
-    fun showDeleteDownloadDialog() {
-        val title = (vm.detail ?: vm.galleryInfo)?.let { EhUtils.getSuitableTitle(it) }.orEmpty()
-        val builder = CheckBoxDialogBuilder(
-            context,
-            resources.getString(R.string.download_remove_dialog_message, title),
-            resources.getString(R.string.download_remove_dialog_check_text),
-            Settings.removeImageFiles,
-        )
-        builder.setTitle(R.string.download_remove_dialog_title)
-            .setPositiveButton(android.R.string.ok) { _, _ -> vm.deleteDownload(builder.isChecked) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
+    // 一次性的对话框状态：置空即关闭，与旧「AlertDialog 活不过重建」等价
+    var deleteDownloadDialog by remember { mutableStateOf(false) }
+    var rateDialog by remember { mutableStateOf(false) }
+    var archiveDialog by remember { mutableStateOf<ArchiveListState?>(null) }
+    var torrentDialog by remember { mutableStateOf<TorrentListState?>(null) }
+    var filterUploaderDialog by remember { mutableStateOf(false) }
+    var addTagDialog by remember { mutableStateOf(false) }
+    var newerVersionDialog by remember { mutableStateOf(false) }
 
     fun showRateDialog() {
         val d = vm.detail ?: return
@@ -124,20 +131,7 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
             host.showTip(resources.getString(R.string.error_please_login_first), TIP_LENGTH_LONG)
             return
         }
-        val view = android.view.LayoutInflater.from(context).inflate(R.layout.dialog_rate, null)
-        val ratingText = view.findViewById<android.widget.TextView>(R.id.rating_text)
-        val ratingBar = view.findViewById<com.hippo.ehviewer.widget.GalleryRatingBar>(R.id.rating_view)
-        ratingText.text = resources.getString(ratingTextRes(d.rating))
-        ratingBar.rating = d.rating
-        ratingBar.setOnUserRateListener { rating ->
-            ratingText.text = resources.getString(ratingTextRes(rating))
-        }
-        androidx.appcompat.app.AlertDialog.Builder(context)
-            .setTitle(R.string.rate)
-            .setView(view)
-            .setPositiveButton(android.R.string.ok) { _, _ -> vm.rate(ratingBar.rating) }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        rateDialog = true
     }
 
     fun showArchiveList() {
@@ -147,140 +141,34 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
             return
         }
         if (d.archiveUrl == null) return
-        val view = android.view.LayoutInflater.from(context).inflate(R.layout.dialog_archive_list, null)
-        val progress = view.findViewById<android.view.View>(R.id.progress)
-        val errorText = view.findViewById<android.widget.TextView>(R.id.text)
-        val listView = view.findViewById<android.widget.ListView>(R.id.list_view)
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(context)
-            .setView(view)
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-
-        fun bind(data: List<ArchiveParser.Archive>, funds: com.hippo.ehviewer.client.parser.HomeParser.Funds?) {
-            if (data.isEmpty()) {
-                progress.visibility = android.view.View.GONE
-                errorText.visibility = android.view.View.VISIBLE
-                listView.visibility = android.view.View.GONE
-                errorText.setText(R.string.no_archives)
-                return
-            }
-            val names = data.map {
-                if (it.isHAtH) {
-                    val cost = if (it.cost == "Free") resources.getString(R.string.archive_free) else it.cost
-                    "[H@H] ${it.name} [${it.size}] [$cost]"
-                } else {
-                    val nameStr = resources.getString(
-                        if (it.res == "org") R.string.archive_original else R.string.archive_resample,
-                    )
-                    val cost = if (it.cost == "Free!") resources.getString(R.string.archive_free) else it.cost
-                    "$nameStr [${it.size}] [$cost]"
-                }
-            }.toTypedArray()
-            progress.visibility = android.view.View.GONE
-            errorText.visibility = android.view.View.GONE
-            listView.visibility = android.view.View.VISIBLE
-            listView.adapter = android.widget.ArrayAdapter(context, R.layout.item_select_dialog, names)
-            if (funds != null) {
-                var gp = funds.fundsGP.toString()
-                if (EhUtils.isExHentai) gp += "+"
-                dialog.setTitle(resources.getString(R.string.current_funds, gp, funds.fundsC))
-            }
-            listView.setOnItemClickListener { _, _, position, _ ->
-                vm.downloadArchive(
-                    data[position],
-                    onSuccess = { url -> startArchiveDownload(context, activity, d, url, host) },
-                    onFailure = {
-                        host.showTip(resources.getString(R.string.download_archive_failure), TIP_LENGTH_LONG)
-                    },
-                )
-                dialog.dismiss()
-            }
-        }
-
-        progress.visibility = android.view.View.VISIBLE
-        errorText.visibility = android.view.View.GONE
-        listView.visibility = android.view.View.GONE
+        archiveDialog = ArchiveListState.Loading
         vm.loadArchives(
-            onSuccess = { data, funds -> bind(data, funds) },
-            onFailure = { e ->
-                if (!dialog.isShowing) return@loadArchives
-                progress.visibility = android.view.View.GONE
-                errorText.visibility = android.view.View.VISIBLE
-                listView.visibility = android.view.View.GONE
-                errorText.text = ExceptionUtils.getReadableString(e)
+            onSuccess = { data, funds ->
+                val fundsTitle = funds?.let {
+                    var gp = it.fundsGP.toString()
+                    if (EhUtils.isExHentai) gp += "+"
+                    resources.getString(R.string.current_funds, gp, it.fundsC)
+                }
+                archiveDialog = ArchiveListState.Ready(data, fundsTitle)
             },
+            onFailure = { e -> archiveDialog = ArchiveListState.Failed(ExceptionUtils.getReadableString(e)) },
         )
     }
 
     fun showTorrentList() {
         val d = vm.detail ?: return
         if (d.torrentUrl == null) return
-        val view = android.view.LayoutInflater.from(context).inflate(R.layout.dialog_torrent_list, null)
-        val progress = view.findViewById<android.view.View>(R.id.progress)
-        val errorText = view.findViewById<android.widget.TextView>(R.id.text)
-        val listView = view.findViewById<android.widget.ListView>(R.id.list_view)
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(context)
-            .setView(view)
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-
-        fun bind(data: List<TorrentParser.Result>) {
-            if (data.isEmpty()) {
-                progress.visibility = android.view.View.GONE
-                errorText.visibility = android.view.View.VISIBLE
-                listView.visibility = android.view.View.GONE
-                errorText.setText(R.string.no_torrents)
-                return
-            }
-            progress.visibility = android.view.View.GONE
-            errorText.visibility = android.view.View.GONE
-            listView.visibility = android.view.View.VISIBLE
-            listView.adapter = android.widget.ArrayAdapter(
-                context,
-                R.layout.item_select_dialog,
-                data.map { it.format() }.toTypedArray(),
-            )
-            listView.setOnItemClickListener { _, _, position, _ ->
-                startTorrentDownload(context, data[position], host)
-                dialog.dismiss()
-            }
-        }
-
-        progress.visibility = android.view.View.VISIBLE
-        errorText.visibility = android.view.View.GONE
-        listView.visibility = android.view.View.GONE
+        torrentDialog = TorrentListState.Loading
         vm.loadTorrents(
-            onSuccess = { bind(it) },
-            onFailure = { e ->
-                if (!dialog.isShowing) return@loadTorrents
-                progress.visibility = android.view.View.GONE
-                errorText.visibility = android.view.View.VISIBLE
-                listView.visibility = android.view.View.GONE
-                errorText.text = ExceptionUtils.getReadableString(e)
-            },
+            onSuccess = { torrentDialog = TorrentListState.Ready(it) },
+            onFailure = { e -> torrentDialog = TorrentListState.Failed(ExceptionUtils.getReadableString(e)) },
         )
     }
 
     fun showFilterUploaderDialog() {
         val uploader = (vm.detail ?: vm.galleryInfo)?.uploader ?: return
         if (uploader.isEmpty()) return
-        androidx.appcompat.app.AlertDialog.Builder(context)
-            .setMessage(resources.getString(R.string.filter_the_uploader, uploader))
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                scope.launchIO {
-                    EhFilter.addFilter(
-                        Filter().apply {
-                            mode = EhFilter.MODE_UPLOADER
-                            text = uploader
-                        },
-                    )
-                    withUIContext {
-                        host.showTip(resources.getString(R.string.filter_added), TIP_LENGTH_SHORT)
-                    }
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        filterUploaderDialog = true
     }
 
     fun showAddTagDialog() {
@@ -289,28 +177,7 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
             host.showTip(resources.getString(R.string.error_please_login_first), TIP_LENGTH_LONG)
             return
         }
-        val input = android.widget.EditText(context).apply {
-            hint = resources.getString(R.string.action_add_tag_tip)
-            setSingleLine()
-        }
-        val container = android.widget.FrameLayout(context).apply {
-            val padding = (16 * resources.displayMetrics.density).toInt()
-            setPadding(padding, padding / 2, padding, 0)
-            addView(input)
-        }
-        androidx.appcompat.app.AlertDialog.Builder(context)
-            .setTitle(R.string.action_add_tag)
-            .setView(container)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                val text = input.text?.toString()?.trim().orEmpty()
-                if (text.isEmpty()) {
-                    host.showTip(resources.getString(R.string.text_is_empty), TIP_LENGTH_SHORT)
-                } else {
-                    vm.voteTag(TagUi(tag = text, display = text), 1)
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        addTagDialog = true
     }
 
     fun read(previewIndex: Int? = null) {
@@ -329,8 +196,15 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
         navigator.push(EhRoute.GalleryList(galleryQueryOf(lub)))
     }
 
+    // 订阅「显示标签翻译」开关与翻译库版本号：页面开着时切开关、或数据刚下完，都能立刻重排标签，
+    // 不用退出重进（这两个值只是订阅用的输入，真正的判断在 buildTags 里）
+    val translateTagsBySetting by Settings.valueFlow(Settings.KEY_SHOW_TAG_TRANSLATIONS, false)
+        .collectAsState(false)
+    val tagDbVersion by EhTagDatabase.versionFlow.collectAsState(0)
+    val translateTags = translateTagsBySetting && tagDbVersion > 0
+
     GalleryDetailScreen(
-        state = vm.uiState(context),
+        state = vm.uiState(context, translateTags),
         onBack = { navigator.pop() },
         onRetry = vm::retry,
         onRefresh = vm::refresh,
@@ -361,7 +235,7 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
             if (vm.downloadState == com.hippo.ehviewer.dao.DownloadInfo.STATE_INVALID) {
                 activity?.let { vm.download(false, it) }
             } else {
-                showDeleteDownloadDialog()
+                deleteDownloadDialog = true
             }
         },
         onDownloadLongClick = { activity?.let { vm.download(true, it) } },
@@ -372,13 +246,7 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
         onNewerVersionClick = {
             val versions = vm.detail?.newerVersions ?: return@GalleryDetailScreen
             if (versions.isEmpty()) return@GalleryDetailScreen
-            androidx.appcompat.app.AlertDialog.Builder(context)
-                .setTitle(R.string.newer_version_title)
-                .setItems(versions.map { it.gid.toString() }.toTypedArray()) { _, which ->
-                    val info = versions[which]
-                    navigator.push(EhRoute.GalleryDetail(gid = info.gid, token = info.token))
-                }
-                .show()
+            newerVersionDialog = true
         },
         onFavoriteClick = { activity?.let { vm.modifyFavorites(false, it) } },
         onFavoriteLongClick = { activity?.let { vm.modifyFavorites(true, it) } },
@@ -449,6 +317,117 @@ fun GalleryDetailScene(route: EhRoute.GalleryDetail) {
             )
         },
     )
+
+    if (deleteDownloadDialog) {
+        val title = (vm.detail ?: vm.galleryInfo)?.let { EhUtils.getSuitableTitle(it) }.orEmpty()
+        DeleteDownloadDialog(
+            message = stringResource(R.string.download_remove_dialog_message, title),
+            checkText = stringResource(R.string.download_remove_dialog_check_text),
+            initialChecked = Settings.removeImageFiles,
+            onConfirm = { removeImageFiles ->
+                deleteDownloadDialog = false
+                vm.deleteDownload(removeImageFiles)
+            },
+            onDismiss = { deleteDownloadDialog = false },
+        )
+    }
+
+    if (rateDialog) {
+        RateDialog(
+            initialRating = vm.detail?.rating ?: 0f,
+            onRate = { rating ->
+                rateDialog = false
+                vm.rate(rating)
+            },
+            onDismiss = { rateDialog = false },
+        )
+    }
+
+    archiveDialog?.let { state ->
+        ArchiveListDialog(
+            state = state,
+            onSelect = { archive ->
+                archiveDialog = null
+                vm.downloadArchive(
+                    archive,
+                    onSuccess = { url ->
+                        vm.detail?.let { detail -> startArchiveDownload(context, activity, detail, url, host) }
+                    },
+                    onFailure = {
+                        host.showTip(resources.getString(R.string.download_archive_failure), TIP_LENGTH_LONG)
+                    },
+                )
+            },
+            onDismiss = { archiveDialog = null },
+        )
+    }
+
+    torrentDialog?.let { state ->
+        TorrentListDialog(
+            state = state,
+            onSelect = { torrent ->
+                torrentDialog = null
+                startTorrentDownload(context, torrent, host)
+            },
+            onDismiss = { torrentDialog = null },
+        )
+    }
+
+    if (filterUploaderDialog) {
+        val uploader = (vm.detail ?: vm.galleryInfo)?.uploader
+        if (uploader.isNullOrEmpty()) {
+            filterUploaderDialog = false
+        } else {
+            ConfirmDialog(
+                message = stringResource(R.string.filter_the_uploader, uploader),
+                onConfirm = {
+                    filterUploaderDialog = false
+                    scope.launchIO {
+                        EhFilter.addFilter(
+                            Filter().apply {
+                                mode = EhFilter.MODE_UPLOADER
+                                text = uploader
+                            },
+                        )
+                        withUIContext {
+                            host.showTip(resources.getString(R.string.filter_added), TIP_LENGTH_SHORT)
+                        }
+                    }
+                },
+                onDismiss = { filterUploaderDialog = false },
+            )
+        }
+    }
+
+    if (addTagDialog) {
+        TextInputDialog(
+            title = stringResource(R.string.action_add_tag),
+            hint = stringResource(R.string.action_add_tag_tip),
+            onSubmit = { text ->
+                addTagDialog = false
+                vm.voteTag(TagUi(tag = text, display = text), 1)
+            },
+            onDismiss = { addTagDialog = false },
+        )
+    }
+
+    if (newerVersionDialog) {
+        val versions = vm.detail?.newerVersions.orEmpty()
+        if (versions.isEmpty()) {
+            newerVersionDialog = false
+        } else {
+            ListChoiceDialog(
+                title = stringResource(R.string.newer_version_title),
+                items = versions.map { it.gid.toString() },
+                onSelect = { index ->
+                    newerVersionDialog = false
+                    val info = versions[index]
+                    navigator.push(EhRoute.GalleryDetail(gid = info.gid, token = info.token))
+                },
+                onDismiss = { newerVersionDialog = false },
+            )
+        }
+    }
 }
 
 private fun showComments(vm: GalleryDetailViewModel, navigator: com.hippo.ehviewer.ui.compose.nav.EhNavigator) {
@@ -542,22 +521,8 @@ private fun getArtist(tags: Array<GalleryTagGroup>?): String? {
     return null
 }
 
-private fun ratingTextRes(rating: Float): Int = when ((rating * 2).roundToInt()) {
-    1 -> R.string.rating1
-    2 -> R.string.rating2
-    3 -> R.string.rating3
-    4 -> R.string.rating4
-    5 -> R.string.rating5
-    6 -> R.string.rating6
-    7 -> R.string.rating7
-    8 -> R.string.rating8
-    9 -> R.string.rating9
-    10 -> R.string.rating10
-    else -> R.string.rating_none
-}
-
 /** 详情页的不可变快照；`version` 用来感知 `GalleryDetail` 的就地修改 */
-private fun GalleryDetailViewModel.uiState(context: Context): GalleryDetailUiState {
+private fun GalleryDetailViewModel.uiState(context: Context, translateTags: Boolean): GalleryDetailUiState {
     val d = detail
     val info: GalleryInfo? = d ?: galleryInfo
     return GalleryDetailUiState(
@@ -583,7 +548,7 @@ private fun GalleryDetailViewModel.uiState(context: Context): GalleryDetailUiSta
         downloadState = downloadState,
         hasNewerVersions = d?.newerVersions?.isNotEmpty() == true,
         newerVersions = d?.newerVersions?.map { it.gid.toString() to it.token.orEmpty() }.orEmpty(),
-        tags = buildTags(context, d?.tags),
+        tags = buildTags(context, d?.tags, translateTags),
         comments = buildComments(d?.comments?.comments),
         commentsTotal = d?.comments?.comments?.size ?: 0,
         previews = buildPreviews(d, gid),
@@ -595,16 +560,12 @@ private fun GalleryDetailViewModel.uiState(context: Context): GalleryDetailUiSta
     )
 }
 
-private const val TAG_PREFIX_WEAK = "_W"
-private const val TAG_PREFIX_LOCK = "_L"
-private const val TAG_PREFIX_UP = "_U"
-private const val TAG_PREFIX_DN = "_D"
 private const val TAG_STATUS_UP = " \u2191"
 private const val TAG_STATUS_DN = " \u2193"
 
-private fun buildTags(context: Context, tags: Array<GalleryTagGroup>?): List<TagGroupUi> {
+private fun buildTags(context: Context, tags: Array<GalleryTagGroup>?, enabled: Boolean): List<TagGroupUi> {
     if (tags.isNullOrEmpty()) return emptyList()
-    val translate = Settings.showTagTranslations && EhTagDatabase.isTranslatable(context)
+    val translate = enabled && EhTagDatabase.isTranslatable(context)
     return tags.map { group ->
         val groupName = group.groupName.orEmpty()
         TagGroupUi(
@@ -614,26 +575,24 @@ private fun buildTags(context: Context, tags: Array<GalleryTagGroup>?): List<Tag
                 groupName
             },
             tags = group.map { raw ->
+                // 标签名前面挂着解析器加的标记：_U/_D（投票）、_W（弱标签）、_L（已锁）。
+                // 每个标记都是「下划线 + 字母」两位，而且可能叠在一起（顺序是 _L _W _U），
+                // 必须整段剥干净——剥剩一个字母就去查翻译，永远查不到
                 var name = raw
                 var weak = false
                 var locked = false
                 var status = TagStatus.NONE
-                if (name.startsWith(TAG_PREFIX_WEAK)) {
-                    weak = true
-                    name = name.substring(1)
-                }
-                if (name.startsWith(TAG_PREFIX_LOCK)) {
-                    locked = true
-                    name = name.substring(1)
-                }
-                when {
-                    name.startsWith(TAG_PREFIX_UP) -> {
-                        status = TagStatus.UP
-                        name = name.substring(1)
+                var stripping = true
+                while (stripping && name.length > 2 && name[0] == '_') {
+                    when (name[1]) {
+                        'W' -> weak = true
+                        'L' -> locked = true
+                        'U' -> status = TagStatus.UP
+                        'D' -> status = TagStatus.DOWN
+                        else -> stripping = false
                     }
-                    name.startsWith(TAG_PREFIX_DN) -> {
-                        status = TagStatus.DOWN
-                        name = name.substring(1)
+                    if (stripping) {
+                        name = name.substring(2)
                     }
                 }
                 val fullTag = "$groupName:$name"

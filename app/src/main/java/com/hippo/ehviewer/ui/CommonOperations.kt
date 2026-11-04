@@ -16,12 +16,8 @@
 package com.hippo.ehviewer.ui
 
 import android.app.Activity
-import android.content.DialogInterface
 import android.content.Intent
-import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
-import com.hippo.app.EditTextCheckBoxDialogBuilder
-import com.hippo.app.ListCheckBoxDialogBuilder
 import com.hippo.ehviewer.EhApplication.Companion.application
 import com.hippo.ehviewer.EhApplication.Companion.favouriteStatusRouter
 import com.hippo.ehviewer.EhDB
@@ -32,6 +28,7 @@ import com.hippo.ehviewer.client.EhRequest
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.download.DownloadService
+import com.hippo.ehviewer.ui.host.DialogRequest
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_SHORT
 import com.hippo.unifile.UniFile
 import com.hippo.util.isAtLeastT
@@ -44,7 +41,7 @@ import kotlinx.coroutines.sync.withLock
 
 object CommonOperations {
     private fun doAddToFavorites(
-        activity: Activity,
+        activity: MainActivity,
         galleryInfo: GalleryInfo,
         slot: Int,
         note: String,
@@ -58,7 +55,7 @@ object CommonOperations {
     }
 
     private fun doAddToFavorites(
-        activity: Activity,
+        activity: MainActivity,
         galleryInfo: GalleryInfo,
         slot: Int,
         listener: EhClient.Callback<Unit>,
@@ -77,23 +74,21 @@ object CommonOperations {
                 if (!foreEdit && Settings.neverAddFavNotes) {
                     doAddToFavorites(activity, galleryInfo, slot, "", listener)
                 } else {
-                    val builder = EditTextCheckBoxDialogBuilder(
-                        activity,
-                        null,
-                        activity.getString(R.string.favorite_note),
-                        activity.getString(R.string.favorite_note_never_show),
-                        Settings.neverAddFavNotes,
+                    activity.showDialog(
+                        DialogRequest.TextInput(
+                            title = activity.getString(R.string.add_favorite_note_dialog_title),
+                            hint = activity.getString(R.string.favorite_note),
+                            initialText = "",
+                            positiveText = activity.getString(android.R.string.ok),
+                            checkText = activity.getString(R.string.favorite_note_never_show),
+                            initialChecked = Settings.neverAddFavNotes,
+                            onConfirm = { text, checked ->
+                                Settings.putNeverAddFavNotes(checked)
+                                doAddToFavorites(activity, galleryInfo, slot, text.trim(), listener)
+                            },
+                            onCancel = { listener.onCancel() },
+                        ),
                     )
-                    builder.setTitle(R.string.add_favorite_note_dialog_title)
-                    builder.setPositiveButton(android.R.string.ok, null)
-                    val dialog = builder.show()
-                    dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-                        val text = builder.text.trim()
-                        Settings.putNeverAddFavNotes(builder.isChecked)
-                        dialog.dismiss()
-                        doAddToFavorites(activity, galleryInfo, slot, text, listener)
-                    }
-                    dialog.setOnCancelListener { listener.onCancel() }
                 }
             }
             else -> {
@@ -103,7 +98,7 @@ object CommonOperations {
     }
 
     fun addToFavorites(
-        activity: Activity,
+        activity: MainActivity,
         galleryInfo: GalleryInfo,
         listener: EhClient.Callback<Unit>,
         foreSelect: Boolean = false,
@@ -121,31 +116,31 @@ object CommonOperations {
                 false,
             )
         } else {
-            ListCheckBoxDialogBuilder(
-                activity,
-                items,
-                { builder: ListCheckBoxDialogBuilder?, _: AlertDialog?, position: Int ->
-                    val slot1 = position - 1
-                    val newFavoriteName = if (slot1 in 0..9) items[slot1 + 1] else null
-                    doAddToFavorites(
-                        activity,
-                        galleryInfo,
-                        slot1,
-                        DelegateFavoriteCallback(listener, galleryInfo, newFavoriteName, slot1),
-                        foreSelect,
-                    )
-                    if (builder?.isChecked == true) {
-                        Settings.putDefaultFavSlot(slot1)
-                    } else {
-                        Settings.putDefaultFavSlot(Settings.INVALID_DEFAULT_FAV_SLOT)
-                    }
-                },
-                activity.getString(R.string.remember_favorite_collection),
-                slot != Settings.INVALID_DEFAULT_FAV_SLOT,
+            activity.showDialog(
+                DialogRequest.ListSingleChoice(
+                    title = activity.getString(R.string.add_favorites_dialog_title),
+                    items = items,
+                    checkText = activity.getString(R.string.remember_favorite_collection),
+                    initialChecked = slot != Settings.INVALID_DEFAULT_FAV_SLOT,
+                    onSelect = { position, checked ->
+                        val slot1 = position - 1
+                        val newFavoriteName = if (slot1 in 0..9) items[slot1 + 1] else null
+                        doAddToFavorites(
+                            activity,
+                            galleryInfo,
+                            slot1,
+                            DelegateFavoriteCallback(listener, galleryInfo, newFavoriteName, slot1),
+                            foreSelect,
+                        )
+                        if (checked) {
+                            Settings.putDefaultFavSlot(slot1)
+                        } else {
+                            Settings.putDefaultFavSlot(Settings.INVALID_DEFAULT_FAV_SLOT)
+                        }
+                    },
+                    onCancel = { listener.onCancel() },
+                ),
             )
-                .setTitle(R.string.add_favorites_dialog_title)
-                .setOnCancelListener { listener.onCancel() }
-                .show()
         }
     }
 
@@ -242,42 +237,43 @@ object CommonOperations {
             val items = mutableListOf<String>()
             items.add(activity.getString(R.string.default_download_label_name))
             items.addAll(list.mapNotNull { it.label })
-            ListCheckBoxDialogBuilder(
-                activity,
-                items,
-                { builder: ListCheckBoxDialogBuilder?, _: AlertDialog?, position: Int ->
-                    var label1: String?
-                    if (position == 0) {
-                        label1 = null
-                    } else {
-                        label1 = items[position]
-                        if (!DownloadManager.containLabel(label1)) {
+            activity.showDialog(
+                DialogRequest.ListSingleChoice(
+                    title = activity.getString(R.string.download),
+                    items = items,
+                    checkText = activity.getString(R.string.remember_download_label),
+                    initialChecked = false,
+                    onSelect = { position, checked ->
+                        var label1: String?
+                        if (position == 0) {
                             label1 = null
+                        } else {
+                            label1 = items[position]
+                            if (!DownloadManager.containLabel(label1)) {
+                                label1 = null
+                            }
                         }
-                    }
-                    // Start download
-                    for (gi in toAdd) {
-                        val intent = Intent(activity, DownloadService::class.java)
-                        intent.action = DownloadService.ACTION_START
-                        intent.putExtra(DownloadService.KEY_LABEL, label1)
-                        intent.putExtra(DownloadService.KEY_GALLERY_INFO, gi)
-                        ContextCompat.startForegroundService(activity, intent)
-                    }
-                    // Save settings
-                    if (builder?.isChecked == true) {
-                        Settings.putHasDefaultDownloadLabel(true)
-                        Settings.putDefaultDownloadLabel(label1)
-                    } else {
-                        Settings.putHasDefaultDownloadLabel(false)
-                    }
-                    // Notify
-                    activity.showTip(R.string.added_to_download_list, TIP_LENGTH_SHORT)
-                },
-                activity.getString(R.string.remember_download_label),
-                false,
+                        // Start download
+                        for (gi in toAdd) {
+                            val intent = Intent(activity, DownloadService::class.java)
+                            intent.action = DownloadService.ACTION_START
+                            intent.putExtra(DownloadService.KEY_LABEL, label1)
+                            intent.putExtra(DownloadService.KEY_GALLERY_INFO, gi)
+                            ContextCompat.startForegroundService(activity, intent)
+                        }
+                        // Save settings
+                        if (checked) {
+                            Settings.putHasDefaultDownloadLabel(true)
+                            Settings.putDefaultDownloadLabel(label1)
+                        } else {
+                            Settings.putHasDefaultDownloadLabel(false)
+                        }
+                        // Notify
+                        activity.showTip(R.string.added_to_download_list, TIP_LENGTH_SHORT)
+                    },
+                    onCancel = {},
+                ),
             )
-                .setTitle(R.string.download)
-                .show()
         }
     }
 

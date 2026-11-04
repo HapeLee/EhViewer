@@ -18,7 +18,6 @@ package com.hippo.ehviewer.ui.page.downloads
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -32,7 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
-import androidx.core.view.GravityCompat
+import com.hippo.ehviewer.EhApplication.Companion.searchDatabase
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
@@ -44,6 +43,7 @@ import com.hippo.ehviewer.download.DownloadManager.DownloadInfoListener
 import com.hippo.ehviewer.download.DownloadService
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.ui.MainActivity
+import com.hippo.ehviewer.ui.compose.component.GalleryItemLayout
 import com.hippo.ehviewer.ui.compose.nav.EhRoute
 import com.hippo.ehviewer.ui.compose.nav.ReaderSource
 import com.hippo.ehviewer.ui.compose.nav.ehNavigator
@@ -51,6 +51,7 @@ import com.hippo.ehviewer.ui.compose.screen.DownloadItemUi
 import com.hippo.ehviewer.ui.compose.screen.DownloadLabelUi
 import com.hippo.ehviewer.ui.compose.screen.DownloadsScreen
 import com.hippo.ehviewer.ui.compose.screen.DownloadsUiState
+import com.hippo.ehviewer.ui.host.DialogRequest
 import com.hippo.ehviewer.ui.host.TIP_LENGTH_LONG
 import com.hippo.ehviewer.ui.host.ehHostOrNoOp
 import com.hippo.unifile.UniFile
@@ -127,6 +128,8 @@ fun DownloadsScene(route: EhRoute.Downloads) {
     var sort by remember { mutableIntStateOf(Settings.defaultSortingMethod) }
     var typeFilter by remember { mutableIntStateOf(-1) }
     var keyword by remember { mutableStateOf<String?>(null) }
+    // 列表 / 网格形态：下载页有自己的卡片密度，不和画廊列表的 Settings.listMode 混用
+    var listMode by rememberSaveable { mutableIntStateOf(GalleryItemLayout.GRID) }
     var infos by remember { mutableStateOf<List<DownloadInfo>>(emptyList()) }
     var selection by remember { mutableStateOf(emptySet<Long>()) }
     var version by remember { mutableIntStateOf(0) }
@@ -297,16 +300,25 @@ fun DownloadsScene(route: EhRoute.Downloads) {
         ContextCompat.startForegroundService(target, intent)
     }
 
+    // 文案在组合里取：`context.getString` 不跟 Configuration 走，改语言后弹窗仍是旧语言
+    val resetMessage = stringResource(R.string.reset_reading_progress_message)
+    val okText = stringResource(android.R.string.ok)
+    val cancelText = stringResource(android.R.string.cancel)
+
     fun confirmResetReadingProgress() {
-        AlertDialog.Builder(context)
-            .setMessage(R.string.reset_reading_progress_message)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                scope.launchNonCancellable {
-                    DownloadManager.resetAllReadingProgress()
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        host.showDialog(
+            DialogRequest.Message(
+                title = null,
+                message = resetMessage,
+                positiveText = okText,
+                negativeText = cancelText,
+                onPositive = {
+                    scope.launchNonCancellable {
+                        DownloadManager.resetAllReadingProgress()
+                    }
+                },
+            ),
+        )
     }
 
     fun readDownloaded(gid: Long) {
@@ -445,9 +457,34 @@ fun DownloadsScene(route: EhRoute.Downloads) {
             typeFilter = typeFilter,
             keyword = keyword,
             scrollToGid = scrollToGid,
+            listMode = listMode,
             version = version,
         ),
-        onOpenNavDrawer = { host.toggleDrawer(GravityCompat.START) },
+        onOpenNavDrawer = { host.toggleLeftDrawer() },
+        onRefresh = ::rebuild,
+        onToggleListMode = {
+            listMode = if (listMode == GalleryItemLayout.GRID) {
+                GalleryItemLayout.LIST
+            } else {
+                GalleryItemLayout.GRID
+            }
+        },
+        onSearch = { query ->
+            // 搜索条与「过滤 → 标题」共用同一个槽位：空词等于取消标题过滤
+            if (query.isNotBlank()) {
+                scope.launchIO { runCatching { searchDatabase.addQuery(query.trim()) } }
+            }
+            if (query.isBlank()) {
+                if (typeFilter == FILTER_TYPE_TITLE) {
+                    typeFilter = -1
+                    keyword = null
+                }
+            } else {
+                typeFilter = FILTER_TYPE_TITLE
+                keyword = query.lowercase()
+            }
+            rebuild()
+        },
         onToggleSelect = { gid -> selection = if (gid in selection) selection - gid else selection + gid },
         onSelectAll = { selection = infos.map { it.gid }.toSet() },
         onClearSelection = { selection = emptySet() },

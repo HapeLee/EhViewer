@@ -173,6 +173,7 @@
     <string name="torrent_count">Torrent (%d)</string>
     <string name="archive">アーカイブ</string>
     <string name="similar_gallery">類似のギャラリー</string>
+    <string name="tags">タグ</string>
     <string name="no_tags">タグなし</string>
     <string name="no_comments">コメントなし</string>
     <string name="more_comment">他のコメントを見る</string>
@@ -416,6 +417,7 @@
     <string name="settings_read_reading_direction_left_to_right">左から右</string>
     <string name="settings_read_reading_direction_right_to_Left">右から左</string>
     <string name="settings_read_reading_direction_top_to_bottom">上から下</string>
+    <string name="settings_read_reading_direction_webtoon">連続スクロール</string>
     <string name="settings_read_page_scaling">ページの拡大</string>
     <string name="settings_read_page_scaling_actual_size">実際のサイズ</string>
     <string name="settings_read_page_scaling_fit_to_width">幅に合わせる</string>
@@ -572,7 +574,6 @@
     <string name="error_something_wrong_happened">エラーが発生しました</string>
     <string name="no_browser_installed">ブラウザをインストールしてください。</string>
     <string name="cloudflare_bypass_failed">Cloudflare チャレンジのバイパスに失敗しました</string>
-    <string name="open_in_webview">WebView で URL を開いてチャレンジを完了しますか？</string>
     <!-- Readable Time -->
     <string name="from_the_future">未来から</string>
     <string name="just_now">たった今</string>

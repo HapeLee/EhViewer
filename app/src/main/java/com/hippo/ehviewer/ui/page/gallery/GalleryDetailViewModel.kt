@@ -462,7 +462,9 @@ class GalleryDetailViewModel(private val appContext: Context) : ViewModel() {
             application.removeGlobalStuff(this)
             requestId = -1
             galleryDetailCache.put(result.gid, result)
-            EhDB.putHistoryInfo(result)
+            // 这个回调在 UI 上下文里跑（EhClient 用主线程 Handler 回调），
+            // 而 EhDB 摘掉了 allowMainThreadQueries，写历史必须切 IO
+            viewModelScope.launchIO { EhDB.putHistoryInfo(result) }
             detail = result
             galleryInfo = result
             gid = result.gid

@@ -34,6 +34,8 @@ import com.hippo.ehviewer.Settings
  *
  * 账号与图片限额两项有自己的网络流程，交给 [onOpenAccount] / [onOpenImageLimits]
  * 打开对话框，页面本身不碰 IO。
+ *
+ * 排版按「账号与站点 / 外观与列表 / 详情页 / 翻译与内容」四张分组卡摆放。
  */
 @Composable
 fun EhSettingsScreen(
@@ -58,170 +60,176 @@ fun EhSettingsScreen(
     val translationsSourceUrl = stringResource(R.string.settings_eh_tag_translations_source_url)
 
     SettingsScaffold(titleRes = R.string.settings_eh, onBack = onBack) {
-        PreferenceRow(
-            title = stringResource(R.string.settings_eh_account_name),
-            summary = displayName ?: stringResource(R.string.settings_eh_account_name_tourist),
-            onClick = onOpenAccount,
-        )
+        SettingsGroup {
+            PreferenceRow(
+                title = stringResource(R.string.settings_eh_account_name),
+                summary = displayName ?: stringResource(R.string.settings_eh_account_name_tourist),
+                onClick = onOpenAccount,
+            )
+            if (signedIn) {
+                ListPreferenceRow(
+                    key = Settings.KEY_GALLERY_SITE,
+                    default = 0,
+                    titleRes = R.string.settings_eh_gallery_site,
+                    entriesRes = R.array.gallery_site_entries,
+                    valuesRes = R.array.gallery_site_entry_values,
+                    onChange = onGallerySiteChanged,
+                )
+                PreferenceRow(
+                    title = stringResource(R.string.settings_eh_image_limits),
+                    summary = imageLimitsSummary,
+                    onClick = onOpenImageLimits,
+                )
+                PreferenceRow(
+                    title = stringResource(R.string.settings_eh_u_config),
+                    summary = stringResource(R.string.settings_eh_u_config_summary),
+                    onClick = onOpenUConfig,
+                )
+                PreferenceRow(
+                    title = stringResource(R.string.settings_eh_my_tags),
+                    summary = stringResource(R.string.settings_eh_my_tags_summary),
+                    onClick = onOpenMyTags,
+                )
+            }
+        }
 
-        if (signedIn) {
+        SettingsGroup {
             ListPreferenceRow(
-                key = Settings.KEY_GALLERY_SITE,
+                key = Settings.KEY_THEME,
+                default = -1,
+                titleRes = R.string.dark_theme,
+                entriesRes = R.array.night_mode_entries,
+                valuesRes = R.array.night_mode_values,
+                onChange = onThemeChanged,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_BLACK_DARK_THEME,
+                default = false,
+                titleRes = R.string.settings_eh_black_dark_theme,
+                onChange = onBlackDarkThemeChanged,
+            )
+            ListPreferenceRow(
+                key = Settings.KEY_LAUNCH_PAGE,
                 default = 0,
-                titleRes = R.string.settings_eh_gallery_site,
-                entriesRes = R.array.gallery_site_entries,
-                valuesRes = R.array.gallery_site_entry_values,
-                onChange = onGallerySiteChanged,
+                titleRes = R.string.settings_eh_launch_page,
+                entriesRes = R.array.launch_page_entries,
+                valuesRes = R.array.launch_page_entry_values,
             )
-            PreferenceRow(
-                title = stringResource(R.string.settings_eh_image_limits),
-                summary = imageLimitsSummary,
-                onClick = onOpenImageLimits,
+            ListPreferenceRow(
+                key = Settings.KEY_LIST_MODE,
+                default = 0,
+                titleRes = R.string.settings_eh_list_mode,
+                entriesRes = R.array.list_mode_entries,
+                valuesRes = R.array.list_mode_entry_values,
             )
-            PreferenceRow(
-                title = stringResource(R.string.settings_eh_u_config),
-                summary = stringResource(R.string.settings_eh_u_config_summary),
-                onClick = onOpenUConfig,
-            )
-            PreferenceRow(
-                title = stringResource(R.string.settings_eh_my_tags),
-                summary = stringResource(R.string.settings_eh_my_tags_summary),
-                onClick = onOpenMyTags,
-            )
+
+            if (listMode == 0) {
+                SliderPreferenceRow(
+                    key = Settings.KEY_DETAIL_SIZE,
+                    default = 8,
+                    titleRes = R.string.settings_eh_detail_size,
+                    range = 6..12,
+                )
+                SliderPreferenceRow(
+                    key = Settings.KEY_LIST_THUMB_SIZE,
+                    default = 40,
+                    titleRes = R.string.settings_eh_list_tile_thumb_size,
+                    range = 35..60,
+                )
+            } else {
+                SliderPreferenceRow(
+                    key = Settings.KEY_THUMB_SIZE,
+                    default = 4,
+                    titleRes = R.string.settings_eh_thumb_size,
+                    range = 2..10,
+                )
+                SwitchPreferenceRow(
+                    key = Settings.KEY_THUMB_SHOW_TITLE,
+                    default = true,
+                    titleRes = R.string.settings_eh_thumb_show_title,
+                )
+            }
         }
 
-        ListPreferenceRow(
-            key = Settings.KEY_THEME,
-            default = -1,
-            titleRes = R.string.dark_theme,
-            entriesRes = R.array.night_mode_entries,
-            valuesRes = R.array.night_mode_values,
-            onChange = onThemeChanged,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_BLACK_DARK_THEME,
-            default = false,
-            titleRes = R.string.settings_eh_black_dark_theme,
-            onChange = onBlackDarkThemeChanged,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_LAUNCH_PAGE,
-            default = 0,
-            titleRes = R.string.settings_eh_launch_page,
-            entriesRes = R.array.launch_page_entries,
-            valuesRes = R.array.launch_page_entry_values,
-        )
-        ListPreferenceRow(
-            key = Settings.KEY_LIST_MODE,
-            default = 0,
-            titleRes = R.string.settings_eh_list_mode,
-            entriesRes = R.array.list_mode_entries,
-            valuesRes = R.array.list_mode_entry_values,
-        )
-
-        if (listMode == 0) {
-            SliderPreferenceRow(
-                key = Settings.KEY_DETAIL_SIZE,
-                default = 8,
-                titleRes = R.string.settings_eh_detail_size,
-                range = 6..12,
-            )
-            SliderPreferenceRow(
-                key = Settings.KEY_LIST_THUMB_SIZE,
-                default = 40,
-                titleRes = R.string.settings_eh_list_tile_thumb_size,
-                range = 35..60,
-            )
-        } else {
-            SliderPreferenceRow(
-                key = Settings.KEY_THUMB_SIZE,
-                default = 4,
-                titleRes = R.string.settings_eh_thumb_size,
-                range = 2..10,
-            )
+        SettingsGroup {
+            if (signedIn) {
+                SwitchPreferenceRow(
+                    key = Settings.KEY_SHOW_JPN_TITLE,
+                    default = false,
+                    titleRes = R.string.settings_eh_show_jpn_title,
+                    summaryRes = R.string.settings_eh_show_jpn_title_summary,
+                )
+            }
             SwitchPreferenceRow(
-                key = Settings.KEY_THUMB_SHOW_TITLE,
+                key = Settings.KEY_SHOW_GALLERY_PAGES,
                 default = true,
-                titleRes = R.string.settings_eh_thumb_show_title,
+                titleRes = R.string.settings_eh_show_gallery_pages,
+                summaryRes = R.string.settings_eh_show_gallery_pages_summary,
+            )
+            SwitchPreferenceRow(
+                key = Settings.KEY_SHOW_COMMENTS,
+                default = true,
+                titleRes = R.string.settings_eh_show_gallery_comments,
+                summaryRes = R.string.settings_eh_show_gallery_comments_summary,
+            )
+            SliderPreferenceRow(
+                key = Settings.KEY_COMMENT_THRESHOLD,
+                default = -101,
+                titleRes = R.string.settings_eh_comment_threshold,
+                summaryRes = R.string.settings_eh_comment_threshold_summary,
+                range = -101..100,
+            )
+            SliderPreferenceRow(
+                key = Settings.KEY_PREVIEW_NUM,
+                default = 60,
+                titleRes = R.string.settings_eh_preview_num,
+                range = 0..200,
+            )
+            SliderPreferenceRow(
+                key = Settings.KEY_PREVIEW_SIZE,
+                default = 3,
+                titleRes = R.string.settings_eh_preview_size,
+                range = 1..10,
             )
         }
 
-        if (signedIn) {
-            SwitchPreferenceRow(
-                key = Settings.KEY_SHOW_JPN_TITLE,
-                default = false,
-                titleRes = R.string.settings_eh_show_jpn_title,
-                summaryRes = R.string.settings_eh_show_jpn_title_summary,
-            )
-        }
-        SwitchPreferenceRow(
-            key = Settings.KEY_SHOW_GALLERY_PAGES,
-            default = true,
-            titleRes = R.string.settings_eh_show_gallery_pages,
-            summaryRes = R.string.settings_eh_show_gallery_pages_summary,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_SHOW_COMMENTS,
-            default = true,
-            titleRes = R.string.settings_eh_show_gallery_comments,
-            summaryRes = R.string.settings_eh_show_gallery_comments_summary,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_COMMENT_THRESHOLD,
-            default = -101,
-            titleRes = R.string.settings_eh_comment_threshold,
-            summaryRes = R.string.settings_eh_comment_threshold_summary,
-            range = -101..100,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_PREVIEW_NUM,
-            default = 60,
-            titleRes = R.string.settings_eh_preview_num,
-            range = 0..200,
-        )
-        SliderPreferenceRow(
-            key = Settings.KEY_PREVIEW_SIZE,
-            default = 3,
-            titleRes = R.string.settings_eh_preview_size,
-            range = 1..10,
-        )
-
-        if (tagTranslatable) {
-            SwitchPreferenceRow(
-                key = Settings.KEY_SHOW_TAG_TRANSLATIONS,
-                default = false,
-                titleRes = R.string.settings_eh_show_tag_translations,
-                summaryRes = R.string.settings_eh_show_tag_translations_summary,
-                onChange = onShowTagTranslationsChanged,
-            )
+        SettingsGroup {
+            if (tagTranslatable) {
+                SwitchPreferenceRow(
+                    key = Settings.KEY_SHOW_TAG_TRANSLATIONS,
+                    default = false,
+                    titleRes = R.string.settings_eh_show_tag_translations,
+                    summaryRes = R.string.settings_eh_show_tag_translations_summary,
+                    onChange = onShowTagTranslationsChanged,
+                )
+                PreferenceRow(
+                    title = stringResource(R.string.settings_eh_tag_translations_source),
+                    summary = translationsSourceUrl,
+                    onClick = { onOpenUrl(translationsSourceUrl) },
+                )
+            }
             PreferenceRow(
-                title = stringResource(R.string.settings_eh_tag_translations_source),
-                summary = translationsSourceUrl,
-                onClick = { onOpenUrl(translationsSourceUrl) },
+                title = stringResource(R.string.settings_eh_filter),
+                summary = stringResource(R.string.settings_eh_filter_summary),
+                onClick = onOpenFilter,
             )
-        }
-
-        PreferenceRow(
-            title = stringResource(R.string.settings_eh_filter),
-            summary = stringResource(R.string.settings_eh_filter_summary),
-            onClick = onOpenFilter,
-        )
-        SwitchPreferenceRow(
-            key = Settings.KEY_METERED_NETWORK_WARNING,
-            default = false,
-            titleRes = R.string.settings_eh_metered_network_warning,
-        )
-        if (signedIn) {
             SwitchPreferenceRow(
-                key = Settings.KEY_REQUEST_NEWS,
+                key = Settings.KEY_METERED_NETWORK_WARNING,
                 default = false,
-                titleRes = R.string.settings_eh_request_news,
+                titleRes = R.string.settings_eh_metered_network_warning,
+            )
+            if (signedIn) {
+                SwitchPreferenceRow(
+                    key = Settings.KEY_REQUEST_NEWS,
+                    default = false,
+                    titleRes = R.string.settings_eh_request_news,
+                )
+            }
+            SwitchPreferenceRow(
+                key = Settings.KEY_HIDE_HV_EVENTS,
+                default = false,
+                titleRes = R.string.settings_eh_hide_hv_events,
             )
         }
-        SwitchPreferenceRow(
-            key = Settings.KEY_HIDE_HV_EVENTS,
-            default = false,
-            titleRes = R.string.settings_eh_hide_hv_events,
-        )
     }
 }

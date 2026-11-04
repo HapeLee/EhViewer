@@ -20,18 +20,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.core.view.GravityCompat
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.cachedIn
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.EhApplication.Companion.searchDatabase
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.FavouriteStatusRouter
 import com.hippo.ehviewer.R
@@ -79,8 +81,14 @@ fun HistoryScene() {
     val defaultLabel = stringResource(R.string.default_download_label_name)
 
     var dataVersion by remember { mutableIntStateOf(0) }
+    // 标题关键字过滤：交给 Room 的分页查询，换词就换一条 PagingSource
+    var keyword by rememberSaveable { mutableStateOf("") }
 
-    val historyFlow = remember { Pager(PagingConfig(20)) { EhDB.historyLazyList }.flow }
+    val historyFlow = remember(keyword) {
+        Pager(PagingConfig(20)) {
+            if (keyword.isEmpty()) EhDB.historyLazyList else EhDB.searchHistory(keyword)
+        }.flow
+    }
     val downloadInfoListener = remember {
         object : DownloadInfoListener {
             override fun onAdd(info: DownloadInfo, list: List<DownloadInfo>, position: Int) {
@@ -188,10 +196,19 @@ fun HistoryScene() {
     val flow = remember(historyFlow, scope) { historyFlow.cachedIn(scope) }
     HistoryScreen(
         title = title,
+        keyword = keyword,
         items = flow.collectAsLazyPagingItems(),
         actions = actions,
         version = dataVersion,
-        onOpenDrawer = { host.toggleDrawer(GravityCompat.START) },
+        onOpenDrawer = { host.toggleLeftDrawer() },
+        onApplySearch = { query ->
+            val trimmed = query.trim()
+            if (trimmed.isNotEmpty()) {
+                scope.launchIO { runCatching { searchDatabase.addQuery(trimmed) } }
+            }
+            // 换 PagingSource 由 keyword 变化触发，Screen 里不用再 refresh
+            keyword = trimmed
+        },
     )
 }
 

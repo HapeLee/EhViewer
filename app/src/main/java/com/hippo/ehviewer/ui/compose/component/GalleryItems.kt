@@ -18,7 +18,6 @@
 package com.hippo.ehviewer.ui.compose.component
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,8 +31,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarHalf
+import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,8 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -183,12 +191,13 @@ private fun GalleryListItem(
                         modifier = Modifier.weight(1f),
                     )
                     if (selectionMode && selected) {
-                        Image(
-                            painter = painterResource(R.drawable.v_check_all_dark_x24),
+                        Icon(
+                            imageVector = Icons.Filled.Check,
                             contentDescription = null,
                             modifier = Modifier
                                 .padding(start = 4.dp)
                                 .size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -226,10 +235,10 @@ private fun GalleryListItem(
                 if (favourited || downloaded) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         if (favourited) {
-                            StatusIcon(R.drawable.v_heart_x24)
+                            StatusIcon(Icons.Filled.Favorite)
                         }
                         if (downloaded) {
-                            StatusIcon(R.drawable.v_download_x24)
+                            StatusIcon(Icons.Filled.Download)
                         }
                     }
                 }
@@ -291,21 +300,22 @@ private fun GalleryGridItem(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         if (favourited) {
-                            StatusIcon(R.drawable.v_heart_x24)
+                            StatusIcon(Icons.Filled.Favorite)
                         }
                         if (downloaded) {
-                            StatusIcon(R.drawable.v_download_x24)
+                            StatusIcon(Icons.Filled.Download)
                         }
                     }
                 }
                 if (selectionMode && selected) {
-                    Image(
-                        painter = painterResource(R.drawable.v_check_all_dark_x24),
+                    Icon(
+                        imageVector = Icons.Filled.Check,
                         contentDescription = null,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(4.dp)
                             .size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 CategoryBadge(
@@ -356,11 +366,12 @@ private fun GalleryThumb(
 }
 
 @Composable
-private fun StatusIcon(icon: Int) {
-    Image(
-        painter = painterResource(icon),
+private fun StatusIcon(icon: ImageVector) {
+    Icon(
+        imageVector = icon,
         contentDescription = null,
         modifier = Modifier.size(14.dp),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -373,16 +384,18 @@ fun RatingBar(
     val tenths = (rating * 2).roundToInt().coerceIn(0, 10)
     val full = tenths / 2
     val hasHalf = tenths % 2 == 1
+    val starTint = colorResource(R.color.yellow_800)
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         repeat(5) { index ->
             val icon = when {
-                index < full -> R.drawable.v_star_x16
-                index == full && hasHalf -> R.drawable.v_star_half_x16
-                else -> R.drawable.v_star_outline_x16
+                index < full -> Icons.Filled.Star
+                index == full && hasHalf -> Icons.Filled.StarHalf
+                else -> Icons.Filled.StarOutline
             }
-            Image(
-                painter = painterResource(icon),
+            Icon(
+                imageVector = icon,
                 contentDescription = null,
+                tint = starTint,
                 modifier = Modifier.size(starSize),
             )
         }
