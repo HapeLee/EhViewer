@@ -34,7 +34,7 @@
         android:required="true" />
 
     <application
-        android:name="com.hippo.ehviewer.EhApplication"
+        android:name="io.kazusa.ehviewer.EhApplication"
         android:allowBackup="true"
         android:appCategory="image"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -50,7 +50,7 @@
         tools:ignore="UnusedAttribute">
 
         <activity
-            android:name="com.hippo.ehviewer.ui.MainActivity"
+            android:name="io.kazusa.ehviewer.ui.MainActivity"
             android:banner="@mipmap/ic_leanback_banner"
             android:configChanges="screenSize"
             android:exported="true"
@@ -134,7 +134,7 @@
         </activity>
 
         <activity
-            android:name="com.hippo.ehviewer.shortcuts.ShortcutsActivity"
+            android:name="io.kazusa.ehviewer.shortcuts.ShortcutsActivity"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:taskAffinity=""
@@ -152,7 +152,7 @@
         </service>
 
         <service
-            android:name="com.hippo.ehviewer.download.DownloadService"
+            android:name="io.kazusa.ehviewer.download.DownloadService"
             android:foregroundServiceType="dataSync"
             android:label="@string/download_service_label" />
 

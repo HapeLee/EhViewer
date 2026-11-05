@@ -98,7 +98,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "org.moedog.ehviewer"
+        applicationId = "io.kazusa.ehviewer"
+        resValue("string", "shortcut_target_package", "io.kazusa.ehviewer")
         minSdk = 31
         targetSdk = 36
         versionCode = appVersionCode
@@ -140,6 +141,7 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+            resValue("string", "shortcut_target_package", "io.kazusa.ehviewer.debug")
             buildConfigField("String", "BUILD_TIME", "\"\"")
         }
     }
@@ -147,9 +149,10 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
+        resValues = true
     }
 
-    namespace = "com.hippo.ehviewer"
+    namespace = "io.kazusa.ehviewer"
 }
 
 dependencies {

@@ -1,0 +1,65 @@
+package io.kazusa.ehviewer.ui.reader
+
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.kazusa.ehviewer.R
+import kotlinx.coroutines.launch
+
+private val tabs = intArrayOf(
+    R.string.pref_category_reading_mode,
+    R.string.pref_category_general,
+    R.string.custom_filter,
+)
+
+/** 阅读器内设置面板：三页横向翻，第一页随「是否条漫」换内容 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsPager(isWebtoon: Boolean, modifier: Modifier = Modifier, onPageSelected: (Int) -> Unit) {
+    val pagerState = rememberPagerState { tabs.size }
+    LaunchedEffect(onPageSelected) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            onPageSelected(page)
+        }
+    }
+    val scope = rememberCoroutineScope()
+    TabRow(
+        selectedTabIndex = pagerState.currentPage,
+        containerColor = BottomSheetDefaults.ContainerColor,
+    ) {
+        tabs.forEachIndexed { index, res ->
+            Tab(
+                selected = pagerState.currentPage == index,
+                onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                text = { Text(text = stringResource(id = res)) },
+                unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+    HorizontalPager(
+        modifier = modifier,
+        state = pagerState,
+        verticalAlignment = Alignment.Top,
+    ) { page ->
+        ProvideTextStyle(value = MaterialTheme.typography.labelLarge) {
+            when (page) {
+                0 -> ReaderModeSetting(isWebtoon)
+                1 -> ReaderGeneralSetting()
+                2 -> ColorFilterSetting()
+            }
+        }
+    }
+}

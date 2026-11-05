@@ -52,6 +52,23 @@
 
 # Description
 
+## Package and project layout
+
+The namespace and release application ID are `io.kazusa.ehviewer`; debug uses
+`io.kazusa.ehviewer.debug`. Open the repository root in Android Studio and sync Gradle.
+
+```text
+app/
+├── src/main/java/io/kazusa/ehviewer/      Application and Compose UI
+│   ├── support/                         Shared utilities adapted from Hippo
+│   └── tachiyomi/                       Adapted reader components
+├── src/test/java/io/kazusa/ehviewer/     Unit tests
+└── schemas/io.kazusa.ehviewer.*/         Room schema history
+```
+
+Changing the application ID installs a separate app; existing app data is not
+automatically transferred.
+
 An EhViewer fork with classic Material Design 2 style
 
 This fork is for personal use and does not accept feature requests; for common usage issues, please refer to the [Q&A](https://github.com/EhViewer-NekoInverter/EhViewer/issues/18)

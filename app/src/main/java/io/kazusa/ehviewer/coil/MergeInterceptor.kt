@@ -1,0 +1,42 @@
+/*
+ * Copyright 2023 Tarsin Norbin
+ *
+ * This file is part of EhViewer
+ *
+ * EhViewer is free software: you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * EhViewer is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with EhViewer.
+ * If not, see <https://www.gnu.org/licenses/>.
+ */
+package io.kazusa.ehviewer.coil
+
+import coil3.decode.DataSource
+import coil3.intercept.Interceptor
+import coil3.request.ImageResult
+import coil3.request.SuccessResult
+import io.kazusa.ehviewer.client.isNormalPreviewKey
+
+object MergeInterceptor : Interceptor {
+    private val mutex = NamedMutex<String>()
+
+    override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+        val req = chain.request
+        val key = req.memoryCacheKey?.takeIf { it.isNormalPreviewKey }
+        return if (key != null) {
+            val (result, suspended) = mutex.withLockNeedSuspend(key) { chain.proceed() }
+            when (result) {
+                is SuccessResult if (suspended) -> result.copy(dataSource = DataSource.MEMORY)
+                else -> result
+            }
+        } else {
+            chain.proceed()
+        }
+    }
+}

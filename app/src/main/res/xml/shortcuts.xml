@@ -27,8 +27,8 @@
         android:shortcutShortLabel="@string/download_start_all">
         <intent
             android:action="start_all"
-            android:targetClass="com.hippo.ehviewer.shortcuts.ShortcutsActivity"
-            android:targetPackage="org.moedog.ehviewer" />
+            android:targetClass="io.kazusa.ehviewer.shortcuts.ShortcutsActivity"
+            android:targetPackage="@string/shortcut_target_package" />
         <categories android:name="android.shortcut.conversation" />
     </shortcut>
 
@@ -41,8 +41,8 @@
         android:shortcutShortLabel="@string/download_stop_all">
         <intent
             android:action="stop_all"
-            android:targetClass="com.hippo.ehviewer.shortcuts.ShortcutsActivity"
-            android:targetPackage="org.moedog.ehviewer" />
+            android:targetClass="io.kazusa.ehviewer.shortcuts.ShortcutsActivity"
+            android:targetPackage="@string/shortcut_target_package" />
         <categories android:name="android.shortcut.conversation" />
     </shortcut>
 
