@@ -18,7 +18,7 @@ androidx-webkit = "1.15.0"
 coil = "3.5.0"
 # 阅读器：缩放/平移 + 大图自动分块（替代自绘 GL 分块上传）
 telephoto = "0.19.0"
-# 纯 JVM 压缩库（替代 libarchive），见 docs/compose-kotlin-refactor-plan.md 3.3
+# 纯 JVM 压缩库（替代 libarchive）
 # RAR/CBR 暂不支持：入口只有「从文件管理器用 EhViewer 打开」，且 CBC/RAR 属长尾，
 # 需要时再把 junrar 8.1.2 作为独立 backend 加回来
 commons-compress = "1.28.0"
@@ -76,7 +76,7 @@ androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics", ver
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "composeTrain" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "composeTrain" }
 # 注意：MaterialExpressiveTheme 只在 material3 1.5.x 公开（1.4.0 里是 internal），
-# 而 1.5.x 需要整条 compose train 1.13；升级工具链时见 docs/tech-stack-upgrade-report.md
+# 而 1.5.x 需要整条 compose train 1.13，升级工具链时需保持版本对齐
 androidx-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 # 图标：顶栏统一用 Icons.*。BOM 把这条线钉在 1.7.8（上游已停止跟进），它只提供矢量
 # 资源与 Icons 常量，跟 1.13 的 compose 主线混用是安全的；debug 包会因此变大，release 由 R8 裁剪

@@ -9,3 +9,8 @@
 release
 google-services.json
 /.kotlin
+
+# JVM crash reports and heap dumps
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
