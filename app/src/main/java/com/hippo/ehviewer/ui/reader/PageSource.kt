@@ -43,19 +43,15 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.util.Locale
-import kotlinx.coroutines.CompletableDeferred
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /** 页文件名：与 `SpiderDen.perFilename` 一样按 1 基序号排，翻页目录里好认 */
 private const val PAGE_NAME_FORMAT = "%08d"
@@ -66,9 +62,8 @@ private const val IMAGE_NAME_FORMAT = "%d-%s-%08d"
 /**
  * 单页等待上限。
  *
- * 正常下载由 SpiderQueen 自己的超时兜底；这一层只是防止「画廊正在被 DownloadService
- * 下载、读模式下 `preloadPages` 不生效」时无限等待——那种情况旧实现是白屏，
- * 这里是超时后报错，至少还能重试。
+ * 正常下载由 SpiderQueen 自己的超时兜底；这一层还给回调等待设置上限，避免
+ * 网络或下载服务没有返回结果时无限等待。
  */
 private const val PAGE_TIMEOUT_MS = 120_000L
 
@@ -131,7 +126,7 @@ interface PageSource : Closeable {
      *
      * 已下载画廊与压缩包没有「重下」这回事，保持空实现。
      */
-    fun invalidate(index: Int) {
+    suspend fun invalidate(index: Int) {
     }
 
     /**
@@ -154,7 +149,7 @@ private fun readerCacheRoot(context: Context): File = File(context.cacheDir, "re
  * 不直接读全局 `ImageLoader` 的磁盘缓存：下载 / 解压出来的原图要能被 telephoto 的
  * 区域解码随机访问，而 Coil 的磁盘缓存是流式写的不保证这一点。
  */
-fun readerCacheDir(context: Context, key: String): File = File(readerCacheRoot(context), key)
+fun readerCacheDir(context: Context, key: String): File = File(readerCacheRoot(context), "$key-${UUID.randomUUID()}")
 
 /**
  * 清掉上一次进程留下的阅读器缓存。
@@ -182,7 +177,7 @@ class ArchivePageSource(
     private val pageToEntry: List<Int> = emptyList(),
     private val onClose: () -> Unit = {},
 ) : PageSource {
-    private val mutex = Mutex()
+    private val cache = PageFileCache(cacheDir)
     private val indices = pageToEntry.ifEmpty {
         session.entries.indices.filterNot { session.entries[it].isDirectory }
     }
@@ -192,28 +187,21 @@ class ArchivePageSource(
 
     override fun name(index: Int): String = session.entries[indices[index]].name
 
-    override suspend fun page(index: Int): File = withContext(Dispatchers.IO) {
+    override suspend fun page(index: Int): File {
         val name = session.entries[indices[index]].name.substringAfterLast('/')
-        val target = File(cacheDir, "%05d-%s".format(Locale.US, index, name))
-        if (target.isFile && target.length() > 0L) return@withContext target
-        cacheDir.mkdirs()
-        val tmp = File(cacheDir, "${target.name}.part")
-        mutex.withLock {
+        return cache.get(index, "%05d-%s".format(Locale.US, index, name)) { temporary ->
             session.openEntry(indices[index]).use { input ->
-                tmp.outputStream().use { output -> input.copyTo(output) }
+                temporary.outputStream().use { output -> input.copyTo(output) }
             }
         }
-        if (!tmp.renameTo(target)) {
-            tmp.delete()
-            throw IOException("Cannot materialize page $index")
-        }
-        target
     }
 
-    override fun close() {
-        session.close()
-        onClose()
-        cacheDir.deleteRecursively()
+    override fun close() = cache.close {
+        try {
+            session.close()
+        } finally {
+            onClose()
+        }
     }
 }
 
@@ -320,7 +308,7 @@ private fun naturalCompare(lhs: String, rhs: String): Int {
  * 在线 / 缓存页源：把 `SpiderQueen` 的读模式包装成 [PageSource]。
  *
  * 两个刻意的选择：
- * 1. 用 `SpiderQueen.preloadPages` 触发下载，而不是 `request`——后者会顺带把整张图
+ * 1. 用 `SpiderQueen.requestDownload` 触发下载，而不是 `request`——后者会顺带把整张图
  *    解码成 `Image`，Compose 阅读器根本用不到，白占 native 内存还要负责回收；
  * 2. 下载完成后用 `SpiderQueen.save` 把缓存 / 下载目录里的那份拷进本会话的缓存目录，
  *    给 Coil 与 telephoto 一个可随机访问的 `File`。
@@ -334,7 +322,10 @@ class OnlinePageSource(
 ) : PageSource {
     private val queen = obtainSpiderQueen(galleryInfo, SpiderQueen.MODE_READ)
     private val lock = Any()
-    private val pending = HashMap<Int, CompletableDeferred<Unit>>()
+    private val downloads = PageDownloadWaiter(PAGE_TIMEOUT_MS)
+    private val cache = PageFileCache(cacheDir)
+    private val invalidated = HashSet<Int>()
+    private var closed = false
     private val progressFlow = MutableSharedFlow<PageProgress>(extraBufferCapacity = 64)
 
     @Volatile
@@ -347,7 +338,7 @@ class OnlinePageSource(
         override fun onGetPages(pages: Int) {}
 
         override fun onGet509(index: Int) {
-            finish(index, "509")
+            downloads.finish(index, "509")
         }
 
         override fun onPageDownload(index: Int, contentLength: Long, receivedSize: Long, bytesRead: Int) {
@@ -361,11 +352,11 @@ class OnlinePageSource(
         }
 
         override fun onPageSuccess(index: Int, finished: Int, downloaded: Int, total: Int) {
-            finish(index, null)
+            downloads.finish(index, null)
         }
 
         override fun onPageFailure(index: Int, error: String?, finished: Int, downloaded: Int, total: Int) {
-            finish(index, error)
+            downloads.finish(index, error ?: "Cannot download page $index")
         }
 
         override fun onFinish(finished: Int, downloaded: Int, total: Int) {}
@@ -394,9 +385,12 @@ class OnlinePageSource(
     override suspend fun prepare(): Boolean {
         if (ready) return true
         if (!queen.awaitReady()) return false
-        queen.addOnSpiderListener(listener)
-        pageCount = queen.size
-        ready = true
+        synchronized(lock) {
+            if (closed) return false
+            queen.addOnSpiderListener(listener)
+            pageCount = queen.size
+            ready = true
+        }
         return true
     }
 
@@ -406,10 +400,9 @@ class OnlinePageSource(
         if (ready) queen.putStartPage(page)
     }
 
-    override fun invalidate(index: Int) {
-        // 缓存索引与本地副本都要清，否则下一次 page() 会直接复用旧文件
+    override suspend fun invalidate(index: Int) = cache.invalidate(index, pageFilename(index)) {
         queen.mSpiderDen.remove(index)
-        File(cacheDir, PAGE_NAME_FORMAT.format(Locale.US, index + 1)).delete()
+        synchronized(lock) { invalidated.add(index) }
     }
 
     override suspend fun original(index: Int, dir: File): File? = withContext(Dispatchers.IO) {
@@ -420,52 +413,36 @@ class OnlinePageSource(
         file.uri.path?.let(::File)?.takeIf { it.isFile }
     }
 
-    override suspend fun page(index: Int): File = withContext(Dispatchers.IO) {
-        val target = File(cacheDir, PAGE_NAME_FORMAT.format(Locale.US, index + 1))
-        if (target.isFile && target.length() > 0L) return@withContext target
-        awaitDownloaded(index)
-        cacheDir.mkdirs()
-        val tmp = File(cacheDir, "${target.name}.part")
-        if (!queen.save(index, UniFile.fromFile(tmp)!!) || !tmp.renameTo(target)) {
-            tmp.delete()
+    private fun pageFilename(index: Int): String = PAGE_NAME_FORMAT.format(Locale.US, index + 1)
+
+    override suspend fun page(index: Int): File = cache.get(
+        index,
+        pageFilename(index),
+        prepare = { awaitDownloaded(index) },
+    ) { temporary ->
+        if (!queen.save(index, UniFile.fromFile(temporary)!!)) {
             throw IOException("Cannot materialize page $index")
         }
-        target
     }
 
     override fun close() {
-        queen.removeOnSpiderListener(listener)
-        releaseSpiderQueen(queen, SpiderQueen.MODE_READ)
-        // 把还在等页的协程全部叫醒：queen 已经 release，再也不会有人调 finish()，
-        // 否则它们要各自空等到 120s 超时（旋转重建时正好会留下这种僵尸协程）
         synchronized(lock) {
-            pending.values.forEach { it.completeExceptionally(IOException("Page source closed")) }
-            pending.clear()
+            if (closed) return
+            closed = true
         }
-        cacheDir.deleteRecursively()
+        downloads.close()
+        queen.removeOnSpiderListener(listener)
+        cache.close()
+        releaseSpiderQueen(queen, SpiderQueen.MODE_READ)
     }
 
     private suspend fun awaitDownloaded(index: Int) {
-        val deferred = synchronized(lock) {
-            pending[index] ?: CompletableDeferred<Unit>().also { pending[index] = it }
-        }
-        // 只下载、不解码；bounds 覆盖全页，免得把别处正在下的页取消掉
-        queen.preloadPages(listOf(index), 0 to Int.MAX_VALUE)
-        try {
-            withTimeout(PAGE_TIMEOUT_MS) { deferred.await() }
-        } catch (e: TimeoutCancellationException) {
-            synchronized(lock) { pending.remove(index) }
-            throw IOException("Timeout while loading page $index", e)
-        }
-    }
-
-    private fun finish(index: Int, error: String?) {
-        val deferred = synchronized(lock) { pending.remove(index) } ?: return
-        if (error == null) {
-            deferred.complete(Unit)
-        } else {
-            deferred.completeExceptionally(IOException(error))
-        }
+        val force = synchronized(lock) { invalidated.remove(index) }
+        downloads.await(
+            index,
+            isDownloaded = { !force && queen.isPageDownloaded(index) },
+            request = { queen.requestDownload(index, force) },
+        )
     }
 }
 
@@ -480,6 +457,8 @@ class DownloadPageSource(
     private val dir: UniFile,
     private val cacheDir: File,
 ) : PageSource {
+    private val cache = PageFileCache(cacheDir)
+
     @Volatile
     private var files: List<UniFile?> = emptyList()
 
@@ -497,25 +476,17 @@ class DownloadPageSource(
 
     override fun name(index: Int): String = files.getOrNull(index)?.name ?: (index + 1).toString()
 
-    override suspend fun page(index: Int): File = withContext(Dispatchers.IO) {
-        val target = File(cacheDir, PAGE_NAME_FORMAT.format(Locale.US, index + 1))
-        if (target.isFile && target.length() > 0L) return@withContext target
+    override suspend fun page(index: Int): File = cache.get(
+        index,
+        PAGE_NAME_FORMAT.format(Locale.US, index + 1),
+    ) { temporary ->
         val source = files.getOrNull(index) ?: throw IOException("Page $index is not downloaded")
-        cacheDir.mkdirs()
-        val tmp = File(cacheDir, "${target.name}.part")
         source.openInputStream().use { input ->
-            tmp.outputStream().use { output -> input.copyTo(output) }
+            temporary.outputStream().use { output -> input.copyTo(output) }
         }
-        if (!tmp.renameTo(target)) {
-            tmp.delete()
-            throw IOException("Cannot materialize page $index")
-        }
-        target
     }
 
-    override fun close() {
-        cacheDir.deleteRecursively()
-    }
+    override fun close() = cache.close()
 
     private fun scan(): List<UniFile?> {
         val spiderInfo = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME)?.let(::readFromUniFile)

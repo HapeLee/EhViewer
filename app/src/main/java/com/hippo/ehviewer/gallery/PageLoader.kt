@@ -31,6 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -41,8 +43,8 @@ import kotlinx.coroutines.sync.withPermit
 
 private val progressScope = CoroutineScope(Dispatchers.IO)
 
-private const val MAX_CACHE_SIZE = 512 * 1024 * 1024
-private const val MIN_CACHE_SIZE = 256 * 1024 * 1024
+private const val MAX_CACHE_SIZE = 128 * 1024 * 1024
+private const val MIN_CACHE_SIZE = 16 * 1024 * 1024
 
 private fun cacheSize(): Int {
     val total = Runtime.getRuntime().maxMemory()
@@ -66,14 +68,17 @@ abstract class PageLoader(
 
     val pages: List<Page> = List(size) { Page(it) }
 
-    private val loadScope = CoroutineScope(scope.coroutineContext + SupervisorJob())
+    protected val loadScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private val jobs = HashMap<Int, Job>()
     private val mutexes = HashMap<Int, Mutex>()
     private val semaphore = Semaphore(4)
     private val prevIndex = AtomicInteger(-1)
+    private val cacheLock = Any()
+    private val imageCacheSize = cacheSize()
 
-    private val cache = object : LruCache<Int, Image>(cacheSize()) {
-        override fun sizeOf(key: Int, value: Image): Int = value.allocationSize
+    private val cache = object : LruCache<Int, Image>(imageCacheSize) {
+        // Keep a single oversized page until the UI can acquire its reference.
+        override fun sizeOf(key: Int, value: Image): Int = value.allocationSize.coerceIn(1, imageCacheSize)
 
         override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Image, newValue: Image?) {
             if (oldValue === newValue) return
@@ -96,7 +101,10 @@ abstract class PageLoader(
     /** 关闭时释放底层资源（页源、解压会话、临时目录） */
     protected open fun onClose() = Unit
 
+    protected open suspend fun invalidateSource(index: Int) = Unit
+
     fun request(index: Int) {
+        if (closed) return
         val prefetchRange = if (index >= prevIndex.get()) {
             (index + 1)..(index + prefetchPageCount).coerceAtMost(size - 1)
         } else {
@@ -104,10 +112,13 @@ abstract class PageLoader(
         }
         prevIndex.set(index)
 
-        val cached = cache[index]
-        if (cached != null) {
-            notifyPageSucceed(index, cached, replaceCache = false)
-        } else {
+        val hit = synchronized(cacheLock) {
+            cache[index]?.let {
+                notifyPageSucceed(index, it, replaceCache = false)
+                true
+            } ?: false
+        }
+        if (!hit) {
             notifyPageWait(index)
             notifySourceReady(index)
         }
@@ -126,24 +137,17 @@ abstract class PageLoader(
     }
 
     fun retryPage(index: Int, original: Boolean = false) {
+        if (closed) return
+        cancelRequest(index)
         notifyPageWait(index)
-        cache.remove(index)
-        if (original) {
-            loadScope.launch {
-                val src = runCatching { openSource(index, true) }.getOrNull() ?: return@launch
-                runCatching {
-                    val image = Image.decode(src)
-                    notifyPageSucceed(index, image)
-                }.onFailure { notifyPageFailed(index, it.message) }
-            }
-        } else {
-            notifySourceReady(index)
-        }
+        synchronized(cacheLock) { cache.remove(index) }
+        loadPage(index, original = original, invalidate = !original)
     }
 
     /** 裁剪开关之类的设置变化后，所有页要重新解一遍 */
     fun restart() {
-        cache.evictAll()
+        synchronized(jobs) { jobs.values.forEach(Job::cancel) }
+        synchronized(cacheLock) { cache.evictAll() }
         pages.forEach(Page::reset)
     }
 
@@ -153,14 +157,21 @@ abstract class PageLoader(
         pages[index].statusFlow.update {
             when (it) {
                 is PageStatus.Loading -> it.apply { progress.value = percent }
-                else -> PageStatus.Loading(MutableStateFlow(percent))
+                PageStatus.Queued -> PageStatus.Loading(MutableStateFlow(percent))
+                else -> it
             }
         }
     }
 
     fun notifyPageSucceed(index: Int, image: Image, replaceCache: Boolean = true) {
-        if (replaceCache) cache.put(index, image)
-        pages[index].statusFlow.update { PageStatus.Ready(image) }
+        synchronized(cacheLock) {
+            if (closed) {
+                if (replaceCache) image.unpin()
+                return
+            }
+            if (replaceCache) cache.put(index, image)
+            pages[index].statusFlow.update { PageStatus.Ready(image) }
+        }
     }
 
     fun notifyPageFailed(index: Int, error: String?) {
@@ -171,17 +182,21 @@ abstract class PageLoader(
 
     /** 打开某一页的数据源并解码；同一页并发请求会被合并成一次 */
     fun notifySourceReady(index: Int) {
+        loadPage(index)
+    }
+
+    private fun loadPage(index: Int, original: Boolean = false, invalidate: Boolean = false) {
         synchronized(jobs) {
             if (jobs[index]?.isActive == true) return
             jobs[index] = loadScope.launch {
                 try {
                     mutexFor(index).withLock {
                         semaphore.withPermit {
-                            decodeInto(index)
+                            if (invalidate) invalidateSource(index)
+                            decodeInto(index, original)
                         }
                     }
                 } catch (e: CancellationException) {
-                    notifyPageFailed(index, null)
                     throw e
                 } catch (e: Throwable) {
                     notifyPageFailed(index, e.message ?: e.toString())
@@ -190,10 +205,17 @@ abstract class PageLoader(
         }
     }
 
-    private suspend fun decodeInto(index: Int) {
-        val src = openSource(index, false) ?: throw IOException("No source for page $index")
+    private suspend fun decodeInto(index: Int, original: Boolean) {
+        val src = openSource(index, original) ?: throw IOException("No source for page $index")
         try {
-            notifyPageSucceed(index, Image.decode(src))
+            val image = Image.decode(src)
+            try {
+                currentCoroutineContext().ensureActive()
+                notifyPageSucceed(index, image)
+            } catch (e: Throwable) {
+                image.unpin()
+                throw e
+            }
         } catch (e: Throwable) {
             src.close()
             throw e
@@ -204,24 +226,27 @@ abstract class PageLoader(
         mutexes.getOrPut(index) { Mutex() }
     }
 
-    private fun resetIfHolding(index: Int, image: Image) {
+    fun resetIfHolding(index: Int, image: Image) {
         pages[index].statusFlow.update {
             if (it is PageStatus.Ready && it.image === image) PageStatus.Queued else it
         }
     }
 
+    @Volatile
     private var closed = false
 
     override fun close() {
         // 退出按钮与组合销毁都会调 close，落进度只能做一次
-        if (closed) return
-        closed = true
+        synchronized(cacheLock) {
+            if (closed) return
+            closed = true
+            cache.evictAll()
+        }
         synchronized(jobs) {
             jobs.values.forEach(Job::cancel)
             jobs.clear()
         }
         loadScope.cancel()
-        cache.evictAll()
         if (gid != -1L) {
             val page = startPage
             progressScope.launch { runCatching { EhDB.putReadingProgress(gid, page) } }

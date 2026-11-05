@@ -145,21 +145,14 @@ class SpiderDen(private val mGalleryInfo: GalleryInfo) {
             val ext = it.body.contentType()?.subtype ?: "jpg"
             val dst = dir.subFile("$filename.$ext") ?: return null
             return runSuspendCatching {
-                var ret = 0L
                 runInterruptibleOkio {
                     dst.openOutputStream().sink().buffer().use { sink ->
-                        it.body.source().use { source ->
-                            while (true) {
-                                val bytesRead = source.read(sink.buffer, 8192)
-                                if (bytesRead == -1L) break
-                                ret += bytesRead
-                                sink.emitCompleteSegments()
-                            }
-                        }
+                        copyImageBody(it.body, sink)
                     }
                 }
-                if (ret == it.body.contentLength()) dst else null
+                dst
             }.onFailure { e ->
+                dst.delete()
                 Log.e(TAG, "Error", e)
             }.getOrNull()
         }
@@ -183,21 +176,11 @@ class SpiderDen(private val mGalleryInfo: GalleryInfo) {
     private suspend fun saveFromHttpResponse(index: Int, response: Response, notifyProgress: (Long, Long, Int) -> Unit): Boolean {
         val url = response.request.url.toString()
         val extension = response.body.contentType()?.subtype ?: "jpg"
-        val length = response.body.contentLength()
 
-        suspend fun doSave(outFile: UniFile): Long {
-            var ret = 0L
+        suspend fun doSave(outFile: UniFile) {
             runInterruptibleOkio {
                 outFile.openOutputStream().sink().buffer().use { sink ->
-                    response.body.source().use { source ->
-                        while (true) {
-                            val bytesRead = source.read(sink.buffer, 8192)
-                            if (bytesRead == -1L) break
-                            ret += bytesRead
-                            sink.emitCompleteSegments()
-                            notifyProgress(length, ret, bytesRead.toInt())
-                        }
-                    }
+                    copyImageBody(response.body, sink, notifyProgress)
                 }
                 fileHashRegex.find(url)?.let {
                     val expected = it.groupValues[1]
@@ -205,30 +188,29 @@ class SpiderDen(private val mGalleryInfo: GalleryInfo) {
                     check(expected == actual) { "File hash mismatch: expected $expected, but got $actual\nURL: $url" }
                 }
             }
-            return ret
         }
 
-        findDownloadFileForIndex(index, extension)?.runSuspendCatching {
-            return doSave(this) == length
-        }?.onFailure {
-            Log.e(TAG, "Error", it)
-            return false
+        findDownloadFileForIndex(index, extension)?.let { target ->
+            return target.runSuspendCatching {
+                doSave(this)
+                true
+            }.onFailure {
+                target.delete()
+                Log.e(TAG, "Error", it)
+            }.getOrDefault(false)
         }
 
-        // Read Mode, allow save to cache
+        // Validate before committing so a truncated response never becomes a cache hit.
         if (mode == SpiderQueen.MODE_READ) {
             val key = getImageKey(mGid, index)
-            var received: Long = 0
-            runSuspendCatching {
+            return runSuspendCatching {
                 sCache.edit(key) {
                     metadata.toFile().writeText(extension)
-                    received = doSave(UniFile.fromFile(data.toFile())!!)
+                    doSave(UniFile.fromFile(data.toFile())!!)
                 }
             }.onFailure {
                 Log.e(TAG, "Error", it)
-            }.onSuccess {
-                return received == length
-            }
+            }.getOrDefault(false)
         }
 
         return false

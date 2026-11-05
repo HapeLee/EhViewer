@@ -74,7 +74,9 @@ class Image private constructor(image: CoilImage, private val src: ImageSource?)
     private fun recycle() {
         when (val image = innerImage) {
             is DrawableImage -> src?.close()
-            is BitmapImage -> image.bitmap.recycle()
+            // Compose/RenderThread may still reference a bitmap after the UI unpins it.
+            // Let those references and the GC determine when its pixel memory is freed.
+            is BitmapImage -> Unit
             else -> {}
         }
         innerImage = null

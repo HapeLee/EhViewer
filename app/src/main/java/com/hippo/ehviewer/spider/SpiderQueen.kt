@@ -313,6 +313,18 @@ class SpiderQueen private constructor(val galleryInfo: GalleryInfo) : CoroutineS
         mWorkerScope.updateRAList(pages, pair)
     }
 
+    fun isPageDownloaded(index: Int): Boolean = getPageState(index) == STATE_FINISHED && index in mSpiderDen
+
+    /** Reader requests need a fetch even in download mode, without the legacy decoder. */
+    fun requestDownload(index: Int, force: Boolean = false) {
+        check(index in 0 until size)
+        val state = getPageState(index)
+        if (force || state == STATE_FAILED || state == STATE_FINISHED && index !in mSpiderDen) {
+            updatePageState(index, STATE_NONE)
+        }
+        mWorkerScope.download(index, force)
+    }
+
     private fun request(index: Int, force: Boolean) {
         // Get page state
         val state = getPageState(index)
@@ -566,8 +578,9 @@ class SpiderQueen private constructor(val galleryInfo: GalleryInfo) : CoroutineS
             val currentJob = mFetcherJobMap[index]
             val skipHath = force && currentJob?.isActive == true
             if (force) currentJob?.cancel(CancellationException(FORCE_RETRY))
-            if (currentJob?.isActive != true) {
+            if (force || currentJob?.isActive != true) {
                 mFetcherJobMap[index] = launch {
+                    if (force) currentJob?.join()
                     runCatching {
                         mSemaphore.withPermit {
                             doInJob(index, force, skipHath)
@@ -593,6 +606,10 @@ class SpiderQueen private constructor(val galleryInfo: GalleryInfo) : CoroutineS
             if (!isDownloadMode) synchronized(mFetcherJobMap) { doLaunchDownloadJob(index, force) }
             if (force) decoder.cancel(index)
             decoder.launch(index)
+        }
+
+        fun download(index: Int, force: Boolean) {
+            synchronized(mFetcherJobMap) { doLaunchDownloadJob(index, force) }
         }
 
         private suspend fun doInJob(index: Int, force: Boolean, skipHath: Boolean) {

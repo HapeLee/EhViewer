@@ -65,7 +65,7 @@ fun PagerItem(
     modifier: Modifier = Modifier,
     contentModifier: Modifier = Modifier,
 ) {
-    LaunchedEffect(Unit) {
+    LaunchedEffect(page, pageLoader) {
         pageLoader.request(page.index)
         // 页源重启后状态会被重置成 Queued，这时要再请求一次
         page.statusFlow.drop(1).collect {
@@ -74,7 +74,7 @@ fun PagerItem(
             }
         }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(page, pageLoader) {
         onDispose { pageLoader.cancelRequest(page.index) }
     }
     val defaultError = stringResource(id = R.string.decode_image_error)
@@ -104,15 +104,18 @@ fun PagerItem(
         }
         is PageStatus.Ready -> {
             val image = state.image
-            var painter by remember { mutableStateOf<Painter?>(null) }
+            var painter by remember(image) { mutableStateOf<Painter?>(null) }
             LaunchedEffect(image) {
                 if (image.pin()) {
                     painter = image.toPainter()
                     try {
                         awaitCancellation()
                     } finally {
-                        if (image.unpin()) pageLoader.notifyPageWait(page.index)
+                        painter = null
+                        if (image.unpin()) pageLoader.resetIfHolding(page.index, image)
                     }
+                } else {
+                    pageLoader.resetIfHolding(page.index, image)
                 }
             }
             painter?.let { painter ->
