@@ -520,6 +520,8 @@
     <string name="settings_download_restore_not_found">Not found download items to restore</string>
     <string name="settings_download_restore_failed">Restore failed</string>
     <string name="settings_download_restore_successfully">Restore %d items successfully</string>
+    <string name="settings_download_restore_scanning">Scanning download folders %1$d/%2$d</string>
+    <string name="settings_download_restore_restoring">Restoring items %1$d/%2$d</string>
     <string name="settings_download_clean_redundancy">Clear download redundancy</string>
     <string name="settings_download_clean_redundancy_summary">Remove gallery images which are not in download list but in download location</string>
     <string name="settings_download_clean_redundancy_no_redundancy">No redundancy</string>

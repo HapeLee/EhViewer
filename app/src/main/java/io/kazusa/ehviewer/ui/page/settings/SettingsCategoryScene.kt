@@ -279,6 +279,7 @@ private fun DownloadSettingsScene() {
     DownloadSettingsScreen(
         downloadLocationUri = vm.downloadLocationUri,
         running = vm.running,
+        restoreProgress = vm.restoreProgress,
         onBack = navigator::pop,
         onOpenLocation = {
             val location = Settings.downloadLocation
@@ -291,6 +292,7 @@ private fun DownloadSettingsScene() {
         },
         onMediaScanChanged = { scope.launch { keepNoMediaFileStatus() } },
         onRestoreDownload = vm::restoreDownloads,
+        onCancelRestore = vm::cancelRestore,
         onCleanRedundancy = vm::cleanRedundancy,
     )
 
