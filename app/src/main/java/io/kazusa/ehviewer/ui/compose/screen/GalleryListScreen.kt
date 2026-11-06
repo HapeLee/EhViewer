@@ -116,6 +116,8 @@ import io.kazusa.ehviewer.ui.compose.component.EhFabAction
 import io.kazusa.ehviewer.ui.compose.component.EhFabMenu
 import io.kazusa.ehviewer.ui.compose.component.EhPullToRefreshBox
 import io.kazusa.ehviewer.ui.compose.component.EhSearchBarPage
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyColumn
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyVerticalGrid
 import io.kazusa.ehviewer.ui.compose.component.GalleryItem
 import io.kazusa.ehviewer.ui.compose.component.GalleryItemLayout
 import io.kazusa.ehviewer.ui.compose.component.GridCellMinWidth
@@ -376,7 +378,8 @@ fun GalleryListScreen(
                         text = state.emptyText ?: stringResource(R.string.gallery_list_empty_hit),
                         modifier = Modifier.fillMaxSize().padding(padding),
                     )
-                    state.layoutMode == GalleryItemLayout.GRID -> LazyVerticalGrid(
+                    // 列表/网格都挂上快速滑动条：上千条时靠惯性滑到中间太费劲
+                    state.layoutMode == GalleryItemLayout.GRID -> FastScrollLazyVerticalGrid(
                         columns = GridCells.Adaptive(GridCellMinWidth),
                         state = gridState,
                         modifier = Modifier.fillMaxSize().nestedScroll(scroll.connection),
@@ -396,7 +399,7 @@ fun GalleryListScreen(
                             item { LoadingMoreRow() }
                         }
                     }
-                    else -> LazyColumn(
+                    else -> FastScrollLazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().nestedScroll(scroll.connection),
                         contentPadding = PaddingValues(top = contentTop, bottom = contentBottom),

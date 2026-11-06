@@ -112,6 +112,7 @@ import io.kazusa.ehviewer.ui.compose.component.DialogListItemSpacing
 import io.kazusa.ehviewer.ui.compose.component.EhFabAction
 import io.kazusa.ehviewer.ui.compose.component.EhFabMenu
 import io.kazusa.ehviewer.ui.compose.component.EhSearchBarPage
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyColumn
 import io.kazusa.ehviewer.ui.compose.component.SearchHistorySuggestionList
 import io.kazusa.ehviewer.ui.compose.component.rememberSearchBarScrollState
 import kotlin.math.abs
@@ -214,7 +215,7 @@ fun HistoryScreen(
         ) { padding ->
             Box(Modifier.fillMaxSize()) {
                 when {
-                    items.itemCount > 0 -> LazyColumn(
+                    items.itemCount > 0 -> FastScrollLazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
                             .nestedScroll(scroll.connection),

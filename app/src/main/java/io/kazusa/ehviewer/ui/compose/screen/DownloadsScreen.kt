@@ -119,6 +119,8 @@ import io.kazusa.ehviewer.ui.compose.component.DialogRadioItem
 import io.kazusa.ehviewer.ui.compose.component.EhFabAction
 import io.kazusa.ehviewer.ui.compose.component.EhFabMenu
 import io.kazusa.ehviewer.ui.compose.component.EhSearchBarPage
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyColumn
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyVerticalGrid
 import io.kazusa.ehviewer.ui.compose.component.GalleryItemLayout
 import io.kazusa.ehviewer.ui.compose.component.ListItemShape
 import io.kazusa.ehviewer.ui.compose.component.RatingBar
@@ -272,7 +274,7 @@ fun DownloadsScreen(
             ) {
                 EmptyTip()
             }
-            state.listMode == GalleryItemLayout.GRID -> LazyVerticalGrid(
+            state.listMode == GalleryItemLayout.GRID -> FastScrollLazyVerticalGrid(
                 columns = GridCells.Adaptive(132.dp),
                 state = gridState,
                 contentPadding = contentPadding,
@@ -294,7 +296,7 @@ fun DownloadsScreen(
                     )
                 }
             }
-            else -> LazyColumn(
+            else -> FastScrollLazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
                 modifier = Modifier

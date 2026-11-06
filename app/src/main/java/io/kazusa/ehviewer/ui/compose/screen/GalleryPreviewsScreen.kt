@@ -74,6 +74,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import io.kazusa.ehviewer.R
 import io.kazusa.ehviewer.client.data.GalleryPreview
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyVerticalGrid
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -202,7 +203,8 @@ private fun PreviewGrid(
         val edge = 16.dp
         val columns = max(1, ((maxWidth - edge * 2 + gap) / (itemSize + gap)).toInt())
 
-        LazyVerticalGrid(
+        // 一话几百页时靠惯性滑到中间太费劲，挂上快速滑动条
+        FastScrollLazyVerticalGrid(
             state = state,
             columns = GridCells.Fixed(columns),
             contentPadding = PaddingValues(start = edge, end = edge, top = 4.dp, bottom = 16.dp),

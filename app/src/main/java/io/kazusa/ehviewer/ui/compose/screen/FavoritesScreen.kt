@@ -91,6 +91,8 @@ import io.kazusa.ehviewer.ui.compose.component.EhFabAction
 import io.kazusa.ehviewer.ui.compose.component.EhFabMenu
 import io.kazusa.ehviewer.ui.compose.component.EhPullToRefreshBox
 import io.kazusa.ehviewer.ui.compose.component.EhSearchBarPage
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyColumn
+import io.kazusa.ehviewer.ui.compose.component.FastScrollLazyVerticalGrid
 import io.kazusa.ehviewer.ui.compose.component.GalleryItem
 import io.kazusa.ehviewer.ui.compose.component.GalleryItemLayout
 import io.kazusa.ehviewer.ui.compose.component.GridCellMinWidth
@@ -438,7 +440,7 @@ private fun FavoritesListContent(
                     .padding(24.dp),
             )
             else -> if (listMode == GalleryItemLayout.GRID) {
-                LazyVerticalGrid(
+                FastScrollLazyVerticalGrid(
                     columns = GridCells.Adaptive(GridCellMinWidth),
                     state = gridState,
                     modifier = Modifier.fillMaxSize().nestedScroll(scrollConnection),
@@ -461,7 +463,7 @@ private fun FavoritesListContent(
                     }
                 }
             } else {
-                LazyColumn(
+                FastScrollLazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize().nestedScroll(scrollConnection),
                     contentPadding = contentPadding,
